@@ -1,4 +1,3 @@
-use grammers_client::sender::InvocationError;
 use snafu::{Location, Snafu};
 
 #[derive(Debug, Snafu)]
@@ -33,23 +32,9 @@ pub enum Error {
         location: Location,
     },
 
-    #[snafu(display("telegram rpc error: {source}"))]
-    Invoke {
-        source: InvocationError,
-        #[snafu(implicit)]
-        location: Location,
-    },
-
-    #[snafu(display("peer resolution error: {source}"))]
-    PeerResolve {
-        source: Box<dyn std::error::Error + Send + Sync>,
-        #[snafu(implicit)]
-        location: Location,
-    },
-
-    #[snafu(display("message serialization error: {source}"))]
-    Serialize {
-        source: serde_json::Error,
+    #[snafu(display("archive error: {source}"))]
+    Archive {
+        source: hanqing_archive::error::Error,
         #[snafu(implicit)]
         location: Location,
     },

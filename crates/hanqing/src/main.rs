@@ -1,19 +1,11 @@
-use chrono::DateTime;
 use dotenvy::dotenv;
 use mimalloc::MiMalloc;
 use snafu::{ResultExt, ensure};
 use tracing::{info, warn};
 
-use hanqing::error::{
-    ConfigSnafu, DatabaseSnafu, Error, InvokeSnafu, MissingCredentialsSnafu, PeerResolveSnafu,
-    SerializeSnafu, TelegramSnafu,
-};
+use hanqing::error::MissingCredentialsSnafu;
+use hanqing::error::{ArchiveSnafu, ConfigSnafu, DatabaseSnafu, Error, TelegramSnafu};
 use hanqing_config::HanqingConfig;
-use hanqing_database::helper::message::{NewMessage, save_message};
-
-/// Spike scope: archive the newest messages of a single dialog to prove the
-/// Telegram → PostgreSQL loop end to end.
-const SPIKE_MESSAGE_LIMIT: u32 = 100;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -60,57 +52,15 @@ async fn main() -> Result<(), Error> {
         .context(TelegramSnafu)?;
     info!("telegram session authorized");
 
-    // Spike: archive the newest messages of the first dialog.
-    let mut dialogs = client.iter_dialogs();
-    let dialog = dialogs
-        .next()
+    let stats = hanqing_archive::backfill_all(&client, &db, &config.archive)
         .await
-        .context(InvokeSnafu)?
-        .expect("account has no dialogs to archive");
-    let peer = dialog.peer();
-    let chat_id = peer.id().bot_api_dialog_id_unchecked();
-    let peer_ref = peer
-        .to_ref()
-        .await
-        .context(PeerResolveSnafu)?
-        .expect("dialog peer missing from session cache");
+        .context(ArchiveSnafu)?;
     info!(
-        chat_id,
-        name = peer.name().unwrap_or_default(),
-        "archiving dialog"
+        chats = stats.registered_chats,
+        completed = stats.completed_chats,
+        messages = stats.messages,
+        "backfill run complete"
     );
-
-    let mut messages = client.iter_messages(peer_ref);
-    let mut count = 0u32;
-    while let Some(message) = messages.next().await.context(InvokeSnafu)? {
-        let raw = serde_json::to_value(&message.raw).context(SerializeSnafu)?;
-        let date = DateTime::from_timestamp(
-            message.date().as_second(),
-            message.date().subsec_nanosecond() as u32,
-        )
-        .expect("message timestamp out of range")
-        .fixed_offset();
-
-        save_message(
-            &db,
-            NewMessage {
-                chat_id,
-                msg_id: message.id() as i64,
-                date,
-                sender_id: message.sender_id().map(|p| p.bot_api_dialog_id_unchecked()),
-                text: message.text().to_string(),
-                raw,
-            },
-        )
-        .await
-        .context(DatabaseSnafu)?;
-
-        count += 1;
-        if count >= SPIKE_MESSAGE_LIMIT {
-            break;
-        }
-    }
-    info!(count, "spike archive complete");
 
     Ok(())
 }
