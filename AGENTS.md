@@ -7,6 +7,10 @@ Telegram account via MTProto and archives message history into PostgreSQL.
 
 - Single-instance daemon; prefer simple, clear, easy-to-maintain solutions.
 - Multi-instance deployment, distribution, and load balancing are out of scope.
+- **Single-account** (decided 2026-10-11): one Telegram account per deployment;
+  `messages` PK is `(chat_id, msg_id)` without an `account_id` column. Going
+  multi-account later requires a PK migration and `[[accounts]]` config — an
+  accepted trade-off, not a supported goal now.
 
 ## Crate layout
 
