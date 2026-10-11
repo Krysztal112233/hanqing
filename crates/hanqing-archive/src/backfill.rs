@@ -37,6 +37,11 @@ use crate::error::{
 /// Messages per transactional insert + cursor checkpoint.
 const BATCH_SIZE: usize = 200;
 
+/// Consecutive IO errors tolerated before aborting the run. Telegram kills
+/// idle connections routinely; reconnecting and resuming from the persisted
+/// watermark is almost always the right response.
+const MAX_IO_RETRIES: u32 = 10;
+
 /// Flood waits longer than this pause the chat until the next run instead of
 /// sleeping.
 const MAX_FLOOD_WAIT_SECS: u32 = 3600;
@@ -128,10 +133,12 @@ async fn backfill_chat(
 
     let mut batch: Vec<(NewMessage, Option<NewMedia>)> = Vec::with_capacity(BATCH_SIZE);
     let mut total = 0u64;
+    let mut io_retries = 0u32;
 
     loop {
         match iter.next().await {
             Ok(Some(message)) => {
+                io_retries = 0;
                 oldest = oldest.min(message.id() as i64);
                 batch.push(map_message(chat_id, &message)?);
                 total += 1;
@@ -154,6 +161,19 @@ async fn backfill_chat(
                 tokio::time::sleep(Duration::from_secs(u64::from(wait) + 1)).await;
                 // Rebuild the iterator from the persisted watermark rather
                 // than relying on its internal state after an error.
+                iter = client.iter_messages(*peer_ref).offset_id(oldest as i32);
+            }
+            Err(InvocationError::Io(err)) => {
+                flush_batch(db, chat_id, &mut batch, oldest).await?;
+                io_retries += 1;
+                if io_retries > MAX_IO_RETRIES {
+                    return Err(InvocationError::Io(err)).context(InvokeSnafu);
+                }
+                let delay = 2u64.pow(io_retries).min(60);
+                warn!(chat_id, attempt = io_retries, delay, %err, "io error; reconnecting");
+                tokio::time::sleep(Duration::from_secs(delay)).await;
+                // The sender pool reconnects lazily on the next request;
+                // resume from the persisted watermark.
                 iter = client.iter_messages(*peer_ref).offset_id(oldest as i32);
             }
             Err(err) => {
