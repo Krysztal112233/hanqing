@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS media;
+DROP TYPE IF EXISTS media_kind;
+DROP TYPE IF EXISTS media_status;
