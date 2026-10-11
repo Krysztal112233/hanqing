@@ -34,7 +34,9 @@ migration = { path = "./crates/migration/" }
 
 grammers-client = { git = "https://codeberg.org/Lonami/grammers", rev = "16261666dfa49e9749c2716bc1b3011f7ece270f" }
 grammers-mtsender = { git = "https://codeberg.org/Lonami/grammers", rev = "16261666dfa49e9749c2716bc1b3011f7ece270f" }
-grammers-session = { git = "https://codeberg.org/Lonami/grammers", rev = "16261666dfa49e9749c2716bc1b3011f7ece270f" }
+# serde: session values are persisted as JSONB documents. default-features=false
+# drops sqlite-storage (libsql) — the project is PostgreSQL-only.
+grammers-session = { git = "https://codeberg.org/Lonami/grammers", rev = "16261666dfa49e9749c2716bc1b3011f7ece270f", default-features = false, features = ["serde"] }
 # impl-serde: TL types derive Serialize/Deserialize for JSONB raw-column persistence.
 grammers-tl-types = { git = "https://codeberg.org/Lonami/grammers", rev = "16261666dfa49e9749c2716bc1b3011f7ece270f", features = ["impl-serde"] }
 

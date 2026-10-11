@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use crate::error::{ConfigSnafu, Error};
 use config::Config;
 use serde::{Deserialize, Serialize};
@@ -22,12 +20,10 @@ pub struct TelegramConfig {
     pub api_id: i32,
     /// Never commit a real value; override via `HANQING__TELEGRAM__API_HASH`.
     pub api_hash: String,
-    #[serde(default = "default_session_file")]
-    pub session_file: PathBuf,
-}
-
-fn default_session_file() -> PathBuf {
-    PathBuf::from("hanqing.session")
+    /// Phone number in international format. When absent, first-run sign-in
+    /// prompts on stdin. Prefer `HANQING__TELEGRAM__PHONE`.
+    #[serde(default)]
+    pub phone: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

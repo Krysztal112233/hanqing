@@ -6,10 +6,10 @@
 # Obtain from https://my.telegram.org/apps
 api_id = 0
 api_hash = ""
-session_file = "hanqing.session"
+# phone = "+86..."  # optional; prompted on stdin when absent
 
 [database]
-# url = "postgres://hanqing:hanqing@localhost/hanqing"
+# url = "postgres://hanqing@postgresql.lan/hanqing"  # password via env only
 max_connections = 8
 
 [archive]
