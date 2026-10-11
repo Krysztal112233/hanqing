@@ -2,7 +2,9 @@
 
 pub mod prelude;
 
+pub mod media;
 pub mod messages;
+pub mod sea_orm_active_enums;
 pub mod session_dc_home;
 pub mod session_dc_option;
 pub mod session_peer;

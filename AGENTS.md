@@ -42,6 +42,9 @@ Telegram account via MTProto and archives message history into PostgreSQL.
   {...}}`) — account for the nesting when querying inside JSONB.
 - Media binary payloads never go into JSONB; they belong on the filesystem or
   object storage with a path reference in the database.
+- Enum-like DB columns use real PostgreSQL enum types; `sea-orm-cli`
+  generates `DeriveActiveEnum` types (`model/sea_orm_active_enums.rs`) and
+  helpers use those generated enums directly.
 - `grammers-*` crates are pinned by git `rev` from
   <https://codeberg.org/Lonami/grammers> (crates.io releases lag TL layers).
 - SeaORM is pinned exactly (`=2.0.4`); `sea-orm-cli` must match (`just
