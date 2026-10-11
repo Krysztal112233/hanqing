@@ -1,0 +1,57 @@
+[workspace]
+resolver = "3"
+members = [
+	"crates/hanqing",
+	"crates/hanqing-config",
+	"crates/hanqing-database",
+	"crates/hanqing-telegram",
+	"crates/migration",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+config = { version = "0.15", features = ["toml"] }
+dotenvy = "0.15"
+futures = "0.3"
+mimalloc = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+snafu = "0.8"
+tokio = { version = "1.52", features = ["full"] }
+tracing = "0.1"
+uuid = { version = "1.23", features = ["v7"] }
+
+hanqing-config = { path = "./crates/hanqing-config/" }
+hanqing-database = { path = "./crates/hanqing-database/" }
+hanqing-telegram = { path = "./crates/hanqing-telegram/" }
+migration = { path = "./crates/migration/" }
+
+# grammers: crates.io releases lag behind master (TL layer updates), pin a git rev.
+
+grammers-client = { git = "https://codeberg.org/Lonami/grammers", rev = "16261666dfa49e9749c2716bc1b3011f7ece270f" }
+grammers-mtsender = { git = "https://codeberg.org/Lonami/grammers", rev = "16261666dfa49e9749c2716bc1b3011f7ece270f" }
+grammers-session = { git = "https://codeberg.org/Lonami/grammers", rev = "16261666dfa49e9749c2716bc1b3011f7ece270f" }
+
+[workspace.dependencies.tracing-subscriber]
+version = "0.3"
+features = ["env-filter", "json", "registry", "fmt", "tracing-log"]
+
+[workspace.dependencies.sea-orm]
+version = "=2.0.4"
+default-features = false
+features = [
+	"macros",
+	"runtime-tokio",
+	"sqlx-postgres",
+	"with-chrono",
+	"with-json",
+	"with-uuid",
+]
+
+[workspace.dependencies.sea-orm-migration]
+version = "=2.0.4"
+features = ["runtime-tokio", "sqlx-postgres", "with-uuid"]

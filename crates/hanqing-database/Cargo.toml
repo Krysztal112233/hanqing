@@ -1,0 +1,13 @@
+[package]
+name = "hanqing-database"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+chrono.workspace = true
+sea-orm.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+snafu.workspace = true
+tracing.workspace = true
+uuid.workspace = true

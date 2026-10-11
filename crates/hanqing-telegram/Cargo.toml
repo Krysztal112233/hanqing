@@ -1,0 +1,15 @@
+[package]
+name = "hanqing-telegram"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+futures.workspace = true
+grammers-client.workspace = true
+grammers-mtsender.workspace = true
+grammers-session.workspace = true
+snafu.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+hanqing-config.workspace = true

@@ -1,0 +1,18 @@
+[package]
+name = "hanqing"
+default-run = "hanqing"
+
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dotenvy.workspace = true
+mimalloc.workspace = true
+snafu.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+hanqing-config.workspace = true
+hanqing-database.workspace = true
+hanqing-telegram.workspace = true
