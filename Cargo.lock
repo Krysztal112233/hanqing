@@ -1398,18 +1398,32 @@ dependencies = [
 name = "hanqing"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "dotenvy",
- "grammers-client",
+ "hanqing-archive",
  "hanqing-config",
  "hanqing-database",
  "hanqing-telegram",
  "mimalloc",
- "serde_json",
  "snafu",
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "hanqing-archive"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "grammers-client",
+ "grammers-tl-types",
+ "hanqing-config",
+ "hanqing-database",
+ "sea-orm",
+ "serde_json",
+ "snafu",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

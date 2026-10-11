@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
 	"crates/hanqing",
+	"crates/hanqing-archive",
 	"crates/hanqing-config",
 	"crates/hanqing-database",
 	"crates/hanqing-telegram",
@@ -25,6 +26,7 @@ tokio = { version = "1.52", features = ["full"] }
 tracing = "0.1"
 uuid = { version = "1.23", features = ["v7"] }
 
+hanqing-archive = { path = "./crates/hanqing-archive/" }
 hanqing-config = { path = "./crates/hanqing-config/" }
 hanqing-database = { path = "./crates/hanqing-database/" }
 hanqing-telegram = { path = "./crates/hanqing-telegram/" }

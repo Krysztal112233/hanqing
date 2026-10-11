@@ -1,0 +1,17 @@
+[package]
+name = "hanqing-archive"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+chrono.workspace = true
+grammers-client.workspace = true
+grammers-tl-types.workspace = true
+sea-orm.workspace = true
+serde_json.workspace = true
+snafu.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+hanqing-config.workspace = true
+hanqing-database.workspace = true
