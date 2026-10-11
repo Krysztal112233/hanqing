@@ -15,12 +15,12 @@ use grammers_client::message::Message;
 use grammers_client::sender::InvocationError;
 use grammers_client::session::types::PeerRef;
 use hanqing_config::ArchiveConfig;
-use hanqing_database::helper::media::{NewMedia, extract_media, save_media};
-use hanqing_database::helper::message::{NewMessage, save_messages};
+use hanqing_database::helper::media::NewMedia;
+use hanqing_database::helper::message::NewMessage;
+use hanqing_database::helper::prelude::*;
 use hanqing_database::helper::sync_state as store;
-use hanqing_database::model::messages::{
-    Column as MessagesColumn, Entity as MessagesEntity, Model as MessagesModel,
-};
+use hanqing_database::model::messages::{Column as MessagesColumn, Model as MessagesModel};
+use hanqing_database::model::prelude::{Media, Messages};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     DatabaseConnection, EntityTrait as _, QueryFilter as _, QueryOrder as _, QuerySelect as _,
@@ -184,7 +184,9 @@ async fn backfill_chat(
     }
 
     flush_batch(db, chat_id, &mut batch, oldest).await?;
-    store::mark_done(db, chat_id).await.context(DatabaseSnafu)?;
+    store::mark_done(db, chat_id)
+        .await
+        .context(DatabaseSnafu)?;
     info!(chat_id, total, "chat backfill complete");
     Ok(total)
 }
@@ -209,8 +211,10 @@ async fn flush_batch(
     let messages: Vec<NewMessage> = drained.into_iter().map(|(msg, _)| msg).collect();
 
     let txn = db.begin().await.context(DbSnafu)?;
-    let count = save_messages(&txn, messages).await.context(DatabaseSnafu)?;
-    let media_count = save_media(&txn, media).await.context(DatabaseSnafu)?;
+    let count = Messages::save_all(&txn, messages)
+        .await
+        .context(DatabaseSnafu)?;
+    let media_count = Media::save_all(&txn, media).await.context(DatabaseSnafu)?;
     store::update_cursor(&txn, chat_id, oldest)
         .await
         .context(DatabaseSnafu)?;
@@ -229,7 +233,7 @@ fn map_message(chat_id: i64, message: &Message) -> Result<(NewMessage, Option<Ne
     .expect("message timestamp out of range")
     .fixed_offset();
 
-    let media = extract_media(chat_id, message.id() as i64, &raw);
+    let media = Media::extract(chat_id, message.id() as i64, &raw);
 
     Ok((
         NewMessage {
@@ -255,7 +259,7 @@ pub async fn scan_existing_media(db: &DatabaseConnection) -> Result<u64, Error> 
     let mut extracted = 0u64;
 
     loop {
-        let mut query = MessagesEntity::find()
+        let mut query = Messages::find()
             .filter(Expr::cust("raw->'Message' ? 'media'"))
             .order_by_asc(MessagesColumn::ChatId)
             .order_by_asc(MessagesColumn::MsgId)
@@ -275,13 +279,13 @@ pub async fn scan_existing_media(db: &DatabaseConnection) -> Result<u64, Error> 
 
         let media: Vec<NewMedia> = rows
             .iter()
-            .filter_map(|m| extract_media(m.chat_id, m.msg_id, &m.raw))
+            .filter_map(|m| Media::extract(m.chat_id, m.msg_id, &m.raw))
             .collect();
 
         let page_last = rows.last().map(|m| (m.chat_id, m.msg_id));
         scanned += rows.len() as u64;
         extracted += media.len() as u64;
-        save_media(db, media).await.context(DatabaseSnafu)?;
+        Media::save_all(db, media).await.context(DatabaseSnafu)?;
 
         match page_last {
             Some(key) if rows.len() as u64 == PAGE => last = Some(key),

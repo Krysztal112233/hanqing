@@ -35,6 +35,10 @@ Telegram account via MTProto and archives message history into PostgreSQL.
 - Error handling: `snafu`; per-crate `error.rs`; context selectors are
   `pub(crate)` in libraries and `pub` in the binary (main.rs is a separate
   crate from the lib).
+- DB helpers are `async_trait` traits implemented on the entity (fandwill
+  pattern), one trait per table in `hanqing-database/src/helper/`; callers
+  `use hanqing_database::helper::prelude::*` then call `Entity::method(db)`
+  (e.g. `SyncState::find_pending(db)`).
 - Messages are stored with the full Telegram payload serialized into a `raw`
   JSONB column; only high-frequency fields (chat_id, msg_id, date, sender,
   text) are promoted to indexed columns, so `grammers` upgrades don't force
@@ -44,7 +48,7 @@ Telegram account via MTProto and archives message history into PostgreSQL.
   unification makes `grammers_client` re-exports serializable too). Two
   gotchas: `serde_bytes` renders bytes fields as JSON number arrays (fine for
   metadata), and TL enums serialize as externally tagged (`{"Message":
-  {...}}`) — account for the nesting when querying inside JSONB.
+{...}}`) — account for the nesting when querying inside JSONB.
 - Media binary payloads never go into JSONB; they belong on the filesystem or
   object storage with a path reference in the database.
 - Enum-like DB columns use real PostgreSQL enum types; `sea-orm-cli`
@@ -53,7 +57,7 @@ Telegram account via MTProto and archives message history into PostgreSQL.
 - `grammers-*` crates are pinned by git `rev` from
   <https://codeberg.org/Lonami/grammers> (crates.io releases lag TL layers).
 - SeaORM is pinned exactly (`=2.0.4`); `sea-orm-cli` must match (`just
-  gen-entities`).
+gen-entities`).
 - Telegram API credentials live in `.env` / `HANQING__TELEGRAM__*`, never in
   committed files. Session files (`*.session`) are gitignored.
 

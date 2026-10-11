@@ -1512,7 +1512,9 @@ dependencies = [
 name = "hanqing-database"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
+ "hanqing-config",
  "sea-orm",
  "serde",
  "serde_json",

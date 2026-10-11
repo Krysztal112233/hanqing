@@ -15,6 +15,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace.dependencies]
+async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 config = { version = "0.15", features = ["toml"] }

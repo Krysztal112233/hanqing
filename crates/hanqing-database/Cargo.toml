@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 chrono.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
@@ -11,3 +12,5 @@ serde_json.workspace = true
 snafu.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+
+hanqing-config.workspace = true

@@ -11,6 +11,7 @@ pub struct Model {
     pub cursor: Option<i64>,
     pub done: bool,
     pub updated_at: DateTimeWithTimeZone,
+    pub enabled: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

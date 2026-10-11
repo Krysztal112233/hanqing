@@ -2,6 +2,7 @@
 
 pub mod prelude;
 
+pub mod account_settings;
 pub mod media;
 pub mod messages;
 pub mod sea_orm_active_enums;

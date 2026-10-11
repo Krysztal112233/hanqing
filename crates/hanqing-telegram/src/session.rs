@@ -15,7 +15,10 @@ use sea_orm::DatabaseConnection;
 use snafu::ResultExt;
 use tokio::sync::Mutex as AsyncMutex;
 
-use hanqing_database::helper::session as store;
+use hanqing_database::helper::prelude::*;
+use hanqing_database::model::prelude::{
+    SessionDcHome, SessionDcOption, SessionPeer, SessionUpdateState,
+};
 
 use crate::error::{DatabaseSnafu, PgSessionError, PoisonedSnafu, SerdeSnafu};
 
@@ -40,12 +43,12 @@ impl PgSession {
     pub async fn open(db: DatabaseConnection) -> Result<Self, PgSessionError> {
         let defaults = SessionData::default();
 
-        let home_dc = store::load_dc_home(&db)
+        let home_dc = SessionDcHome::load(&db)
             .await
             .context(DatabaseSnafu)?
             .unwrap_or(defaults.home_dc);
 
-        let dc_options = store::load_dc_options(&db)
+        let dc_options = SessionDcOption::load_all(&db)
             .await
             .context(DatabaseSnafu)?
             .into_iter()
@@ -88,7 +91,7 @@ impl Session for PgSession {
         };
         Box::pin(async move {
             ok?;
-            store::save_dc_home(&self.db, dc_id)
+            SessionDcHome::save(&self.db, dc_id)
                 .await
                 .context(DatabaseSnafu)
         })
@@ -118,7 +121,7 @@ impl Session for PgSession {
         Box::pin(async move {
             ok?;
             let data = data.context(SerdeSnafu)?;
-            store::upsert_dc_option(&self.db, dc_id, data)
+            SessionDcOption::upsert(&self.db, dc_id, data)
                 .await
                 .context(DatabaseSnafu)
         })
@@ -127,10 +130,10 @@ impl Session for PgSession {
     fn peer(&self, peer: PeerId) -> BoxFuture<'_, Result<Option<PeerInfo>, PgSessionError>> {
         Box::pin(async move {
             let found = match peer.bot_api_dialog_id() {
-                Some(dialog_id) => store::load_peer(&self.db, dialog_id).await,
+                Some(dialog_id) => SessionPeer::load(&self.db, dialog_id).await,
                 // The self-user sentinel is not a valid storage key; the row
                 // is found by its `is_self` flag inside the JSONB payload.
-                None => store::load_self_peer(&self.db)
+                None => SessionPeer::load_self(&self.db)
                     .await
                     .map(|row| row.map(|(_, data)| data)),
             }
@@ -156,7 +159,7 @@ impl Session for PgSession {
 
             let peer_id = peer.id().bot_api_dialog_id_unchecked();
             let data = serde_json::to_value(&peer).context(SerdeSnafu)?;
-            store::upsert_peer(&self.db, peer_id, data)
+            SessionPeer::upsert(&self.db, peer_id, data)
                 .await
                 .context(DatabaseSnafu)
         })
@@ -164,7 +167,7 @@ impl Session for PgSession {
 
     fn updates_state(&self) -> BoxFuture<'_, Result<UpdatesState, PgSessionError>> {
         Box::pin(async move {
-            match store::load_updates_state(&self.db)
+            match SessionUpdateState::load(&self.db)
                 .await
                 .context(DatabaseSnafu)?
             {
@@ -178,7 +181,7 @@ impl Session for PgSession {
         Box::pin(async move {
             let _guard = self.state_lock.lock().await;
 
-            let mut state = match store::load_updates_state(&self.db)
+            let mut state = match SessionUpdateState::load(&self.db)
                 .await
                 .context(DatabaseSnafu)?
             {
@@ -203,7 +206,7 @@ impl Session for PgSession {
             }
 
             let data = serde_json::to_value(&state).context(SerdeSnafu)?;
-            store::save_updates_state(&self.db, data)
+            SessionUpdateState::save(&self.db, data)
                 .await
                 .context(DatabaseSnafu)
         })
