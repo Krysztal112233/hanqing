@@ -14,10 +14,8 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let db = manager.get_connection();
-        db.execute_unprepared(include_str!(
-            "m20261011_150904_create_media_table/down.sql"
-        ))
-        .await?;
+        db.execute_unprepared(include_str!("m20261011_150904_create_media_table/down.sql"))
+            .await?;
         Ok(())
     }
 }
