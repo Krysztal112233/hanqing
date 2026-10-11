@@ -7,3 +7,4 @@ pub mod session_dc_home;
 pub mod session_dc_option;
 pub mod session_peer;
 pub mod session_update_state;
+pub mod sync_state;

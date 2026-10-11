@@ -1,6 +1,6 @@
 use sea_orm::entity::prelude::DateTimeWithTimeZone;
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveValue::Set, DatabaseConnection, EntityTrait as _};
+use sea_orm::{ActiveValue::Set, ConnectionTrait, EntityTrait as _};
 use serde_json::Value;
 use snafu::ResultExt;
 
@@ -19,26 +19,35 @@ pub struct NewMessage {
     pub raw: Value,
 }
 
-/// Insert a message; re-archiving the same `(chat_id, msg_id)` is a no-op.
-pub async fn save_message(db: &DatabaseConnection, msg: NewMessage) -> Result<(), Error> {
-    let model = MessagesActiveModel {
+/// Bulk-insert messages; re-archiving existing `(chat_id, msg_id)` rows is a
+/// no-op. Returns the number of messages attempted.
+pub async fn save_messages<C: ConnectionTrait>(
+    db: &C,
+    messages: Vec<NewMessage>,
+) -> Result<usize, Error> {
+    let count = messages.len();
+    if count == 0 {
+        return Ok(0);
+    }
+
+    let models = messages.into_iter().map(|msg| MessagesActiveModel {
         chat_id: Set(msg.chat_id),
         msg_id: Set(msg.msg_id),
         date: Set(msg.date),
         sender_id: Set(msg.sender_id),
         text: Set(msg.text),
         raw: Set(msg.raw),
-    };
+    });
 
-    MessagesEntity::insert(model)
+    MessagesEntity::insert_many(models)
         .on_conflict(
             OnConflict::columns([MessagesColumn::ChatId, MessagesColumn::MsgId])
                 .do_nothing()
                 .to_owned(),
         )
-        .exec(db)
+        .exec_without_returning(db)
         .await
         .context(DatabaseSnafu)?;
 
-    Ok(())
+    Ok(count)
 }

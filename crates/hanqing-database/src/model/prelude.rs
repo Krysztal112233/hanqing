@@ -5,3 +5,4 @@ pub use super::session_dc_home::Entity as SessionDcHome;
 pub use super::session_dc_option::Entity as SessionDcOption;
 pub use super::session_peer::Entity as SessionPeer;
 pub use super::session_update_state::Entity as SessionUpdateState;
+pub use super::sync_state::Entity as SyncState;
