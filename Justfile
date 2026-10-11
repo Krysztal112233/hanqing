@@ -4,6 +4,14 @@ default:
 watch:
     watchexec -e rs -r cargo run -p hanqing
 
+# Sign in interactively (one-time per account; session persists in PostgreSQL).
+login *args:
+    cargo run -p hanqing-cli -- login {{args}}
+
+# Extract media metadata from already-archived messages (idempotent).
+scan-media:
+    cargo run -p hanqing-cli -- scan-media
+
 gen-entities:
     # Requires the verified SeaORM CLI version:
     #   cargo install sea-orm-cli --version 2.0.1 --locked --force

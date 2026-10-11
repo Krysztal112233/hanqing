@@ -3,6 +3,7 @@ resolver = "3"
 members = [
 	"crates/hanqing",
 	"crates/hanqing-archive",
+	"crates/hanqing-cli",
 	"crates/hanqing-config",
 	"crates/hanqing-database",
 	"crates/hanqing-telegram",
@@ -15,8 +16,10 @@ edition = "2024"
 
 [workspace.dependencies]
 chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
 config = { version = "0.15", features = ["toml"] }
 dotenvy = "0.15"
+inquire = "0.9"
 futures = "0.3"
 mimalloc = "0.1"
 serde = { version = "1.0", features = ["derive"] }
@@ -27,6 +30,7 @@ tracing = "0.1"
 uuid = { version = "1.23", features = ["v7"] }
 
 hanqing-archive = { path = "./crates/hanqing-archive/" }
+hanqing-cli = { path = "./crates/hanqing-cli/" }
 hanqing-config = { path = "./crates/hanqing-config/" }
 hanqing-database = { path = "./crates/hanqing-database/" }
 hanqing-telegram = { path = "./crates/hanqing-telegram/" }

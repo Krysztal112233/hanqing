@@ -15,6 +15,11 @@ Telegram account via MTProto and archives message history into PostgreSQL.
 ## Crate layout
 
 - `crates/hanqing` — binary (daemon entry); global allocator is `mimalloc`.
+  Account-agnostic: never prompts, exits with an error when no authorized
+  session exists.
+- `crates/hanqing-cli` — management CLI (`clap`): `login` (interactive
+  sign-in, `inquire` prompts), `scan-media`. Sessions live in PG, so login
+  can run on any host that reaches the database.
 - `crates/hanqing-config` — `hanqing.toml` + `HANQING__` env prefix (`__`
   separator); strict parsing (`deny_unknown_fields`), unknown keys are startup
   hard errors.
