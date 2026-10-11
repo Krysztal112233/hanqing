@@ -35,6 +35,8 @@ migration = { path = "./crates/migration/" }
 grammers-client = { git = "https://codeberg.org/Lonami/grammers", rev = "16261666dfa49e9749c2716bc1b3011f7ece270f" }
 grammers-mtsender = { git = "https://codeberg.org/Lonami/grammers", rev = "16261666dfa49e9749c2716bc1b3011f7ece270f" }
 grammers-session = { git = "https://codeberg.org/Lonami/grammers", rev = "16261666dfa49e9749c2716bc1b3011f7ece270f" }
+# impl-serde: TL types derive Serialize/Deserialize for JSONB raw-column persistence.
+grammers-tl-types = { git = "https://codeberg.org/Lonami/grammers", rev = "16261666dfa49e9749c2716bc1b3011f7ece270f", features = ["impl-serde"] }
 
 [workspace.dependencies.tracing-subscriber]
 version = "0.3"

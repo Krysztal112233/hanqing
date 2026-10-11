@@ -27,9 +27,17 @@ Telegram account via MTProto and archives message history into PostgreSQL.
   `pub(crate)` in libraries and `pub` in the binary (main.rs is a separate
   crate from the lib).
 - Messages are stored with the full Telegram payload serialized into a `raw`
-  JSONB column; only high-frequency fields (chat_id, msg_id, date, text) are
-  promoted to indexed columns, so `grammers` upgrades don't force schema
-  changes.
+  JSONB column; only high-frequency fields (chat_id, msg_id, date, sender,
+  text) are promoted to indexed columns, so `grammers` upgrades don't force
+  schema changes.
+- `grammers-tl-types` is a direct dependency with the non-default
+  `impl-serde` feature so TL types derive `Serialize`/`Deserialize` (feature
+  unification makes `grammers_client` re-exports serializable too). Two
+  gotchas: `serde_bytes` renders bytes fields as JSON number arrays (fine for
+  metadata), and TL enums serialize as externally tagged (`{"Message":
+  {...}}`) — account for the nesting when querying inside JSONB.
+- Media binary payloads never go into JSONB; they belong on the filesystem or
+  object storage with a path reference in the database.
 - `grammers-*` crates are pinned by git `rev` from
   <https://codeberg.org/Lonami/grammers> (crates.io releases lag TL layers).
 - SeaORM is pinned exactly (`=2.0.4`); `sea-orm-cli` must match (`just

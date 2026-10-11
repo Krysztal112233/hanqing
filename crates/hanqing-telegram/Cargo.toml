@@ -8,6 +8,7 @@ futures.workspace = true
 grammers-client.workspace = true
 grammers-mtsender.workspace = true
 grammers-session.workspace = true
+grammers-tl-types.workspace = true
 snafu.workspace = true
 tokio.workspace = true
 tracing.workspace = true
