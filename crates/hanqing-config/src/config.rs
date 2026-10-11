@@ -11,6 +11,9 @@ pub struct HanqingConfig {
 
     #[serde(default)]
     pub archive: ArchiveConfig,
+
+    #[serde(default)]
+    pub media: MediaConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,6 +44,30 @@ pub struct ArchiveConfig {
     /// Restrict archiving to these chat IDs; empty = all dialogs.
     #[serde(default)]
     pub chat_ids: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaConfig {
+    /// Download media files; metadata is always archived regardless.
+    #[serde(default)]
+    pub download_enabled: bool,
+    /// Skip downloads larger than this many bytes (default 50 MiB).
+    #[serde(default = "default_max_size_bytes")]
+    pub max_size_bytes: u64,
+}
+
+impl Default for MediaConfig {
+    fn default() -> Self {
+        Self {
+            download_enabled: false,
+            max_size_bytes: default_max_size_bytes(),
+        }
+    }
+}
+
+fn default_max_size_bytes() -> u64 {
+    50 * 1024 * 1024
 }
 
 impl HanqingConfig {
