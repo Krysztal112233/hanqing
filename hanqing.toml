@@ -6,7 +6,7 @@
 # Obtain from https://my.telegram.org/apps
 api_id = 0
 api_hash = ""
-# phone = "+86..."  # optional; prompted on stdin when absent
+# phone 不是 daemon 配置；登录输入由 hanqing-cli login 收集
 
 [database]
 # url = "postgres://hanqing@postgresql.lan/hanqing"  # password via env only

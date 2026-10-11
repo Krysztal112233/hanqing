@@ -1,7 +1,7 @@
 use dotenvy::dotenv;
 use mimalloc::MiMalloc;
 use snafu::{ResultExt, ensure};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use hanqing::error::MissingCredentialsSnafu;
 use hanqing::error::{ArchiveSnafu, ConfigSnafu, DatabaseSnafu, Error, TelegramSnafu};
@@ -44,23 +44,24 @@ async fn main() -> Result<(), Error> {
         .context(DatabaseSnafu)?;
     info!("connected to database");
 
-    // One-shot media metadata extraction from archived messages; no Telegram
-    // connection needed.
-    if std::env::args().any(|arg| arg == "--scan-media") {
-        let count = hanqing_archive::scan_existing_media(&db)
-            .await
-            .context(ArchiveSnafu)?;
-        info!(count, "media scan done");
-        return Ok(());
-    }
-
     let client = hanqing_telegram::connect(&config.telegram, db.clone())
         .await
         .context(TelegramSnafu)?;
-    hanqing_telegram::ensure_authorized(&client, &config.telegram)
+
+    // Account-agnostic gate: the identity is whatever the stored session
+    // carries (missing and revoked sessions both surface as None).
+    let Some(me) = hanqing_telegram::authorized_user(&client)
         .await
-        .context(TelegramSnafu)?;
-    info!("telegram session authorized");
+        .context(TelegramSnafu)?
+    else {
+        error!("no authorized session; run `hanqing-cli login` first");
+        std::process::exit(2);
+    };
+    info!(
+        id = me.id().bot_api_dialog_id_unchecked(),
+        name = me.full_name(),
+        "running as"
+    );
 
     let stats = hanqing_archive::backfill_all(&client, &db, &config.archive)
         .await

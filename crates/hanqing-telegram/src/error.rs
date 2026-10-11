@@ -1,4 +1,4 @@
-use grammers_client::{SignInError, sender::InvocationError};
+use grammers_client::sender::InvocationError;
 use snafu::{Location, Snafu};
 
 #[derive(Debug, Snafu)]
@@ -14,20 +14,6 @@ pub enum Error {
     #[snafu(display("telegram rpc error: {source}"))]
     Invoke {
         source: InvocationError,
-        #[snafu(implicit)]
-        location: Location,
-    },
-
-    #[snafu(display("sign-in error: {source}"))]
-    SignIn {
-        source: SignInError,
-        #[snafu(implicit)]
-        location: Location,
-    },
-
-    #[snafu(display("interactive prompt error: {source}"))]
-    Prompt {
-        source: std::io::Error,
         #[snafu(implicit)]
         location: Location,
     },
