@@ -15,9 +15,17 @@ use grammers_client::message::Message;
 use grammers_client::sender::InvocationError;
 use grammers_client::session::types::PeerRef;
 use hanqing_config::ArchiveConfig;
+use hanqing_database::helper::media::{NewMedia, extract_media, save_media};
 use hanqing_database::helper::message::{NewMessage, save_messages};
 use hanqing_database::helper::sync_state as store;
-use sea_orm::{DatabaseConnection, TransactionTrait as _};
+use hanqing_database::model::messages::{
+    Column as MessagesColumn, Entity as MessagesEntity, Model as MessagesModel,
+};
+use sea_orm::sea_query::Expr;
+use sea_orm::{
+    DatabaseConnection, EntityTrait as _, QueryFilter as _, QueryOrder as _, QuerySelect as _,
+    TransactionTrait as _, Value,
+};
 use snafu::ResultExt;
 use tracing::{info, warn};
 
@@ -118,7 +126,7 @@ async fn backfill_chat(
         iter = iter.offset_id(cursor as i32);
     }
 
-    let mut batch = Vec::with_capacity(BATCH_SIZE);
+    let mut batch: Vec<(NewMessage, Option<NewMedia>)> = Vec::with_capacity(BATCH_SIZE);
     let mut total = 0u64;
 
     loop {
@@ -161,31 +169,38 @@ async fn backfill_chat(
     Ok(total)
 }
 
-/// Insert the batch and advance the watermark in one transaction.
+/// Insert the batch (messages + media metadata) and advance the watermark in
+/// one transaction.
 async fn flush_batch(
     db: &DatabaseConnection,
     chat_id: i64,
-    batch: &mut Vec<NewMessage>,
+    batch: &mut Vec<(NewMessage, Option<NewMedia>)>,
     oldest: i64,
 ) -> Result<(), Error> {
     if batch.is_empty() {
         return Ok(());
     }
 
+    let drained = std::mem::take(batch);
+    let media: Vec<NewMedia> = drained
+        .iter()
+        .filter_map(|(_, media)| media.clone())
+        .collect();
+    let messages: Vec<NewMessage> = drained.into_iter().map(|(msg, _)| msg).collect();
+
     let txn = db.begin().await.context(DbSnafu)?;
-    let count = save_messages(&txn, std::mem::take(batch))
-        .await
-        .context(DatabaseSnafu)?;
+    let count = save_messages(&txn, messages).await.context(DatabaseSnafu)?;
+    let media_count = save_media(&txn, media).await.context(DatabaseSnafu)?;
     store::update_cursor(&txn, chat_id, oldest)
         .await
         .context(DatabaseSnafu)?;
     txn.commit().await.context(DbSnafu)?;
 
-    info!(chat_id, count, oldest, "batch archived");
+    info!(chat_id, count, media_count, oldest, "batch archived");
     Ok(())
 }
 
-fn map_message(chat_id: i64, message: &Message) -> Result<NewMessage, Error> {
+fn map_message(chat_id: i64, message: &Message) -> Result<(NewMessage, Option<NewMedia>), Error> {
     let raw = serde_json::to_value(&message.raw).context(SerializeSnafu)?;
     let date = DateTime::from_timestamp(
         message.date().as_second(),
@@ -194,12 +209,66 @@ fn map_message(chat_id: i64, message: &Message) -> Result<NewMessage, Error> {
     .expect("message timestamp out of range")
     .fixed_offset();
 
-    Ok(NewMessage {
-        chat_id,
-        msg_id: message.id() as i64,
-        date,
-        sender_id: message.sender_id().map(|p| p.bot_api_dialog_id_unchecked()),
-        text: message.text().to_string(),
-        raw,
-    })
+    let media = extract_media(chat_id, message.id() as i64, &raw);
+
+    Ok((
+        NewMessage {
+            chat_id,
+            msg_id: message.id() as i64,
+            date,
+            sender_id: message.sender_id().map(|p| p.bot_api_dialog_id_unchecked()),
+            text: message.text().to_string(),
+            raw,
+        },
+        media,
+    ))
+}
+
+/// One-shot scan: extract media metadata from already-archived messages
+/// (`raw` JSONB), without any Telegram round-trip. Keyset-paginated;
+/// idempotent via `file_id` upsert.
+pub async fn scan_existing_media(db: &DatabaseConnection) -> Result<u64, Error> {
+    const PAGE: u64 = 1000;
+
+    let mut last: Option<(i64, i64)> = None;
+    let mut scanned = 0u64;
+    let mut extracted = 0u64;
+
+    loop {
+        let mut query = MessagesEntity::find()
+            .filter(Expr::cust("raw->'Message' ? 'media'"))
+            .order_by_asc(MessagesColumn::ChatId)
+            .order_by_asc(MessagesColumn::MsgId)
+            .limit(PAGE);
+
+        if let Some((chat_id, msg_id)) = last {
+            query = query.filter(Expr::cust_with_values(
+                "(chat_id, msg_id) > ($1, $2)",
+                [Value::from(chat_id), Value::from(msg_id)],
+            ));
+        }
+
+        let rows: Vec<MessagesModel> = query.all(db).await.context(DbSnafu)?;
+        if rows.is_empty() {
+            break;
+        }
+
+        let media: Vec<NewMedia> = rows
+            .iter()
+            .filter_map(|m| extract_media(m.chat_id, m.msg_id, &m.raw))
+            .collect();
+
+        let page_last = rows.last().map(|m| (m.chat_id, m.msg_id));
+        scanned += rows.len() as u64;
+        extracted += media.len() as u64;
+        save_media(db, media).await.context(DatabaseSnafu)?;
+
+        match page_last {
+            Some(key) if rows.len() as u64 == PAGE => last = Some(key),
+            _ => break,
+        }
+    }
+
+    info!(scanned, extracted, "media metadata scan complete");
+    Ok(extracted)
 }

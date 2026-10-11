@@ -44,6 +44,16 @@ async fn main() -> Result<(), Error> {
         .context(DatabaseSnafu)?;
     info!("connected to database");
 
+    // One-shot media metadata extraction from archived messages; no Telegram
+    // connection needed.
+    if std::env::args().any(|arg| arg == "--scan-media") {
+        let count = hanqing_archive::scan_existing_media(&db)
+            .await
+            .context(ArchiveSnafu)?;
+        info!(count, "media scan done");
+        return Ok(());
+    }
+
     let client = hanqing_telegram::connect(&config.telegram, db.clone())
         .await
         .context(TelegramSnafu)?;
