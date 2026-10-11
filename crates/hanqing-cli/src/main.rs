@@ -30,6 +30,38 @@ enum Command {
     /// Extract media metadata from already-archived messages (idempotent,
     /// no Telegram connection).
     ScanMedia,
+
+    /// View and adjust per-account behavior settings (stored in PostgreSQL).
+    Settings {
+        #[command(subcommand)]
+        command: SettingsCommand,
+    },
+
+    /// Per-chat archive switches.
+    Chats {
+        #[command(subcommand)]
+        command: ChatsCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum SettingsCommand {
+    /// Show the effective settings.
+    Show,
+    /// Set a key (e.g. `settings set media.max_size_bytes 10485760`).
+    Set { key: String, value: String },
+    /// Reset one key (or all) to defaults.
+    Reset { key: Option<String> },
+}
+
+#[derive(Subcommand)]
+enum ChatsCommand {
+    /// List registered chats with enabled/done state and watermark.
+    Ls,
+    /// Include a chat in archiving.
+    Enable { chat_id: i64 },
+    /// Exclude a chat from archiving (progress is kept).
+    Disable { chat_id: i64 },
 }
 
 #[tokio::main]
@@ -73,6 +105,24 @@ async fn main() -> Result<(), Error> {
                 .context(ArchiveSnafu)?;
             info!(count, "media scan done");
         }
+        Command::Settings { command } => match command {
+            SettingsCommand::Show => hanqing_cli::settings::show(&db, &config.telegram).await?,
+            SettingsCommand::Set { key, value } => {
+                hanqing_cli::settings::set(&db, &config.telegram, &key, &value).await?;
+            }
+            SettingsCommand::Reset { key } => {
+                hanqing_cli::settings::reset(&db, &config.telegram, key.as_deref()).await?;
+            }
+        },
+        Command::Chats { command } => match command {
+            ChatsCommand::Ls => hanqing_cli::chats::ls(&db).await?,
+            ChatsCommand::Enable { chat_id } => {
+                hanqing_cli::chats::set_enabled(&db, chat_id, true).await?;
+            }
+            ChatsCommand::Disable { chat_id } => {
+                hanqing_cli::chats::set_enabled(&db, chat_id, false).await?;
+            }
+        },
     }
 
     Ok(())

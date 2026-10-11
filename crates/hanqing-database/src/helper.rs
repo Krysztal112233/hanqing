@@ -4,4 +4,5 @@ pub mod media;
 pub mod message;
 pub mod prelude;
 pub mod session;
+pub mod settings;
 pub mod sync_state;

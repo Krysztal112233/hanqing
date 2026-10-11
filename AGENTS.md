@@ -54,6 +54,11 @@ Telegram account via MTProto and archives message history into PostgreSQL.
 - Enum-like DB columns use real PostgreSQL enum types; `sea-orm-cli`
   generates `DeriveActiveEnum` types (`model/sea_orm_active_enums.rs`) and
   helpers use those generated enums directly.
+- Config split: files/env hold connectivity only (`telegram.api_id/api_hash`,
+  `database.*`); behavior settings live in the DB — per-account document in
+  `account_settings` (schema = `hanqing_config::AccountSettings`, strict
+  serde), per-chat archive switch as `sync_state.enabled` (managed via
+  `hanqing-cli settings|chats`).
 - `grammers-*` crates are pinned by git `rev` from
   <https://codeberg.org/Lonami/grammers> (crates.io releases lag TL layers).
 - SeaORM is pinned exactly (`=2.0.4`); `sea-orm-cli` must match (`just

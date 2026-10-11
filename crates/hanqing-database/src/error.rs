@@ -9,4 +9,22 @@ pub enum Error {
         #[snafu(implicit)]
         location: Location,
     },
+
+    #[snafu(display("settings document (de)serialization error: {source}"))]
+    Json {
+        source: serde_json::Error,
+        #[snafu(implicit)]
+        location: Location,
+    },
+
+    #[snafu(display(
+        "session account {session} does not match archived account {archived}; \
+         refusing to mix archives (reset with `just reset-session` to start over)"
+    ))]
+    AccountMismatch {
+        session: i64,
+        archived: i64,
+        #[snafu(implicit)]
+        location: Location,
+    },
 }

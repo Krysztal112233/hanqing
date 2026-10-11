@@ -14,13 +14,11 @@ use grammers_client::Client;
 use grammers_client::message::Message;
 use grammers_client::sender::InvocationError;
 use grammers_client::session::types::PeerRef;
-use hanqing_config::ArchiveConfig;
 use hanqing_database::helper::media::NewMedia;
 use hanqing_database::helper::message::NewMessage;
 use hanqing_database::helper::prelude::*;
-use hanqing_database::helper::sync_state as store;
 use hanqing_database::model::messages::{Column as MessagesColumn, Model as MessagesModel};
-use hanqing_database::model::prelude::{Media, Messages};
+use hanqing_database::model::prelude::{Media, Messages, SyncState};
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     DatabaseConnection, EntityTrait as _, QueryFilter as _, QueryOrder as _, QuerySelect as _,
@@ -53,14 +51,14 @@ pub struct BackfillStats {
     pub messages: u64,
 }
 
-/// Enumerate all dialogs into `sync_state`, then backfill every pending chat.
+/// Enumerate all dialogs into `sync_state`, then backfill every pending
+/// (unfinished, enabled) chat.
 pub async fn backfill_all(
     client: &Client,
     db: &DatabaseConnection,
-    config: &ArchiveConfig,
 ) -> Result<BackfillStats, Error> {
-    let peers = register_dialogs(client, db, config).await?;
-    let pending = store::pending_chats(db).await.context(DatabaseSnafu)?;
+    let peers = register_dialogs(client, db).await?;
+    let pending = SyncState::find_pending(db).await.context(DatabaseSnafu)?;
 
     let mut stats = BackfillStats {
         registered_chats: peers.len(),
@@ -89,16 +87,12 @@ pub async fn backfill_all(
 async fn register_dialogs(
     client: &Client,
     db: &DatabaseConnection,
-    config: &ArchiveConfig,
 ) -> Result<HashMap<i64, PeerRef>, Error> {
     let mut peers = HashMap::new();
     let mut dialogs = client.iter_dialogs();
     while let Some(dialog) = dialogs.next().await.context(InvokeSnafu)? {
         let peer = dialog.peer();
         let chat_id = peer.id().bot_api_dialog_id_unchecked();
-        if !config.chat_ids.is_empty() && !config.chat_ids.contains(&chat_id) {
-            continue;
-        }
         let peer_ref = peer
             .to_ref()
             .await
@@ -109,7 +103,7 @@ async fn register_dialogs(
     info!(count = peers.len(), "dialogs enumerated");
 
     let chat_ids: Vec<i64> = peers.keys().copied().collect();
-    store::register_chats(db, &chat_ids)
+    SyncState::register_all(db, &chat_ids)
         .await
         .context(DatabaseSnafu)?;
     Ok(peers)
@@ -184,7 +178,7 @@ async fn backfill_chat(
     }
 
     flush_batch(db, chat_id, &mut batch, oldest).await?;
-    store::mark_done(db, chat_id)
+    SyncState::mark_done(db, chat_id)
         .await
         .context(DatabaseSnafu)?;
     info!(chat_id, total, "chat backfill complete");
@@ -215,7 +209,7 @@ async fn flush_batch(
         .await
         .context(DatabaseSnafu)?;
     let media_count = Media::save_all(&txn, media).await.context(DatabaseSnafu)?;
-    store::update_cursor(&txn, chat_id, oldest)
+    SyncState::update_cursor(&txn, chat_id, oldest)
         .await
         .context(DatabaseSnafu)?;
     txn.commit().await.context(DbSnafu)?;

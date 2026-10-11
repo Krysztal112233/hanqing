@@ -57,4 +57,34 @@ pub enum Error {
         #[snafu(implicit)]
         location: Location,
     },
+
+    #[snafu(display("no authorized session; run `hanqing-cli login` first"))]
+    NoSession {
+        #[snafu(implicit)]
+        location: Location,
+    },
+
+    #[snafu(display("unknown setting `{key}`; valid keys: {valid}"))]
+    UnknownSetting {
+        key: String,
+        valid: String,
+        #[snafu(implicit)]
+        location: Location,
+    },
+
+    #[snafu(display("invalid value `{value}` for `{key}`: expected {expected}"))]
+    InvalidValue {
+        key: String,
+        value: String,
+        expected: &'static str,
+        #[snafu(implicit)]
+        location: Location,
+    },
+
+    #[snafu(display("chat {chat_id} is not registered; the daemon registers dialogs on each run"))]
+    UnknownChat {
+        chat_id: i64,
+        #[snafu(implicit)]
+        location: Location,
+    },
 }

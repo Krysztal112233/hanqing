@@ -12,11 +12,3 @@ api_hash = ""
 # url = "postgres://hanqing@postgresql.lan/hanqing"  # password via env only
 max_connections = 8
 
-[archive]
-# Optional: restrict archiving to these chat IDs; empty = all dialogs.
-chat_ids = []
-
-[media]
-# Media metadata is always archived; downloading is a separate opt-in step.
-download_enabled = false
-max_size_bytes = 52428800  # 50 MiB

@@ -1493,6 +1493,8 @@ dependencies = [
  "hanqing-database",
  "hanqing-telegram",
  "inquire",
+ "sea-orm",
+ "serde_json",
  "snafu",
  "tokio",
  "tracing",

@@ -8,12 +8,6 @@ use snafu::ResultExt;
 pub struct HanqingConfig {
     pub telegram: TelegramConfig,
     pub database: DatabaseConfig,
-
-    #[serde(default)]
-    pub archive: ArchiveConfig,
-
-    #[serde(default)]
-    pub media: MediaConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,36 +28,32 @@ pub struct DatabaseConfig {
     pub max_connections: Option<u32>,
 }
 
+/// Per-account behavior settings, stored as one JSONB document in
+/// `account_settings` (this struct is the schema; `deny_unknown_fields`
+/// keeps it strict like file config). Connectivity config stays in
+/// `hanqing.toml`; everything about *what/how* to archive lives here.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ArchiveConfig {
-    /// Restrict archiving to these chat IDs; empty = all dialogs.
-    #[serde(default)]
-    pub chat_ids: Vec<i64>,
+#[serde(deny_unknown_fields, default)]
+pub struct AccountSettings {
+    pub media: MediaSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MediaConfig {
+#[serde(deny_unknown_fields, default)]
+pub struct MediaSettings {
     /// Download media files; metadata is always archived regardless.
-    #[serde(default)]
     pub download_enabled: bool,
-    /// Skip downloads larger than this many bytes (default 50 MiB).
-    #[serde(default = "default_max_size_bytes")]
+    /// Skip downloads larger than this many bytes.
     pub max_size_bytes: u64,
 }
 
-impl Default for MediaConfig {
+impl Default for MediaSettings {
     fn default() -> Self {
         Self {
             download_enabled: false,
-            max_size_bytes: default_max_size_bytes(),
+            max_size_bytes: 50 * 1024 * 1024,
         }
     }
-}
-
-fn default_max_size_bytes() -> u64 {
-    50 * 1024 * 1024
 }
 
 impl HanqingConfig {

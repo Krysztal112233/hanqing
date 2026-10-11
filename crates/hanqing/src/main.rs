@@ -6,6 +6,8 @@ use tracing::{error, info, warn};
 use hanqing::error::MissingCredentialsSnafu;
 use hanqing::error::{ArchiveSnafu, ConfigSnafu, DatabaseSnafu, Error, TelegramSnafu};
 use hanqing_config::HanqingConfig;
+use hanqing_database::helper::prelude::*;
+use hanqing_database::model::prelude::AccountSettings;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -63,7 +65,15 @@ async fn main() -> Result<(), Error> {
         "running as"
     );
 
-    let stats = hanqing_archive::backfill_all(&client, &db, &config.archive)
+    // Behavior settings live in the database (per account); first run
+    // self-initializes defaults. Also the single-account guard: a session
+    // belonging to a different account than the archive aborts here.
+    let settings = AccountSettings::load_or_init(&db, me.id().bot_api_dialog_id_unchecked())
+        .await
+        .context(DatabaseSnafu)?;
+    info!(?settings, "account settings loaded");
+
+    let stats = hanqing_archive::backfill_all(&client, &db)
         .await
         .context(ArchiveSnafu)?;
     info!(
