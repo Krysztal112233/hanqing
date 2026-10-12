@@ -76,15 +76,12 @@ impl Session for PgSession {
     }
 
     fn set_home_dc_id(&self, dc_id: i32) -> BoxFuture<'_, Result<(), PgSessionError>> {
-        let ok = match self.cache.lock() {
-            Err(_) => Err(PoisonedSnafu.build()),
-            Ok(mut cache) => {
-                cache.home_dc = dc_id;
-                Ok(())
-            }
-        };
         Box::pin(async move {
-            ok?;
+            // The lock guard drops at the end of this statement, before the await.
+            self.cache
+                .lock()
+                .map_err(|_| PoisonedSnafu.build())?
+                .home_dc = dc_id;
             SessionDcHome::save(&self.db, dc_id)
                 .await
                 .context(DatabaseSnafu)
@@ -103,18 +100,17 @@ impl Session for PgSession {
     }
 
     fn set_dc_option(&self, dc_option: &DcOption) -> BoxFuture<'_, Result<(), PgSessionError>> {
-        let ok = match self.cache.lock() {
-            Err(_) => Err(PoisonedSnafu.build()),
-            Ok(mut cache) => {
-                cache.dc_options.insert(dc_option.id, dc_option.clone());
-                Ok(())
-            }
-        };
-        let data = serde_json::to_value(dc_option);
-        let dc_id = dc_option.id;
+        // Own the option so the future borrows only `self`.
+        let dc_option = dc_option.clone();
         Box::pin(async move {
-            ok?;
-            let data = data.context(SerdeSnafu)?;
+            let data = serde_json::to_value(&dc_option).context(SerdeSnafu)?;
+            let dc_id = dc_option.id;
+            // The lock guard drops at the end of this statement, before the await.
+            self.cache
+                .lock()
+                .map_err(|_| PoisonedSnafu.build())?
+                .dc_options
+                .insert(dc_id, dc_option);
             SessionDcOption::upsert(&self.db, dc_id, data)
                 .await
                 .context(DatabaseSnafu)
