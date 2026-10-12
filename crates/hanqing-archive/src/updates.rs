@@ -5,7 +5,7 @@
 //! losslessly. The stream runs concurrently with backfill: both write through
 //! the same idempotent upserts.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::DateTime;
 use grammers_client::Client;
@@ -27,6 +27,11 @@ use crate::error::{DatabaseSnafu, Error, InvokeSnafu, StreamSetupSnafu};
 /// Consecutive IO errors tolerated before giving up; the sender pool
 /// reconnects lazily, so brief network blips should just be slept off.
 const MAX_IO_RETRIES: u32 = 10;
+
+/// grammers persists update state only when asked (`sync_update_state`), so
+/// the stream snapshots it periodically. On restart, catch_up replays from
+/// the last snapshot; archive upserts make the replay idempotent.
+const STATE_SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Follow the live update stream forever, archiving message events.
 pub async fn run_update_stream(
@@ -51,6 +56,12 @@ pub async fn run_update_stream(
         })?;
     info!("update stream started");
 
+    // Persist the post-catch-up state right away, then periodically.
+    if let Err(err) = stream.sync_update_state().await {
+        warn!(%err, "failed to sync update state");
+    }
+    let mut last_sync = Instant::now();
+
     let mut io_retries = 0u32;
     loop {
         match stream.next().await {
@@ -58,6 +69,12 @@ pub async fn run_update_stream(
                 io_retries = 0;
                 if let Err(err) = handle_update(db, update, self_id).await {
                     warn!(%err, "failed to archive update; skipping");
+                }
+                if last_sync.elapsed() >= STATE_SYNC_INTERVAL {
+                    if let Err(err) = stream.sync_update_state().await {
+                        warn!(%err, "failed to sync update state");
+                    }
+                    last_sync = Instant::now();
                 }
             }
             Err(InvocationError::Io(err)) => {
