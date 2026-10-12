@@ -2,7 +2,9 @@
 
 pub use super::account_settings::Entity as AccountSettings;
 pub use super::media::Entity as Media;
+pub use super::message_versions::Entity as MessageVersions;
 pub use super::messages::Entity as Messages;
+pub use super::session_channel_state::Entity as SessionChannelState;
 pub use super::session_dc_home::Entity as SessionDcHome;
 pub use super::session_dc_option::Entity as SessionDcOption;
 pub use super::session_peer::Entity as SessionPeer;

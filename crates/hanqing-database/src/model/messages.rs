@@ -16,17 +16,27 @@ pub struct Model {
     pub text: String,
     #[sea_orm(column_type = "JsonBinary")]
     pub raw: Json,
+    pub edited_at: Option<DateTimeWithTimeZone>,
+    pub deleted_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(has_many = "super::media::Entity")]
     Media,
+    #[sea_orm(has_many = "super::message_versions::Entity")]
+    MessageVersions,
 }
 
 impl Related<super::media::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Media.def()
+    }
+}
+
+impl Related<super::message_versions::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::MessageVersions.def()
     }
 }
 

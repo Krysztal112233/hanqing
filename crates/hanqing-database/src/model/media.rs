@@ -43,4 +43,13 @@ impl Related<super::messages::Entity> for Entity {
     }
 }
 
+impl Related<super::message_versions::Entity> for Entity {
+    fn to() -> RelationDef {
+        super::messages::Relation::MessageVersions.def()
+    }
+    fn via() -> Option<RelationDef> {
+        Some(super::messages::Relation::Media.def().rev())
+    }
+}
+
 impl ActiveModelBehavior for ActiveModel {}
