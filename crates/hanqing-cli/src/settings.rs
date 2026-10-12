@@ -22,10 +22,10 @@ async fn session_account(
     db: &DatabaseConnection,
     config: &hanqing_config::TelegramConfig,
 ) -> Result<i64, Error> {
-    let client = hanqing_telegram::connect(config, db.clone())
+    let connection = hanqing_telegram::connect(config, db.clone())
         .await
         .context(TelegramSnafu)?;
-    let me = hanqing_telegram::authorized_user(&client)
+    let me = hanqing_telegram::authorized_user(&connection.client)
         .await
         .context(TelegramSnafu)?
         .context(NoSessionSnafu)?;

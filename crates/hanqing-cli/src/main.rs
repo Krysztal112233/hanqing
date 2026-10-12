@@ -94,10 +94,12 @@ async fn main() -> Result<(), Error> {
 
     match Cli::parse().command {
         Command::Login { phone } => {
-            let client = hanqing_telegram::connect(&config.telegram, db)
+            // The updates receiver is dropped with the connection: login is
+            // short-lived and follows no stream.
+            let connection = hanqing_telegram::connect(&config.telegram, db)
                 .await
                 .context(TelegramSnafu)?;
-            hanqing_cli::login::login(&client, &config.telegram.api_hash, phone).await?;
+            hanqing_cli::login::login(&connection.client, &config.telegram.api_hash, phone).await?;
         }
         Command::ScanMedia => {
             let count = hanqing_archive::scan_existing_media(&db)
