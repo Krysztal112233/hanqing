@@ -80,17 +80,10 @@ async fn main() -> Result<(), Error> {
     }
 
     let config = HanqingConfig::new().context(ConfigSnafu)?;
-    let db = hanqing_database::setup::connect(
-        &config
-            .database
-            .url
-            .clone()
-            .or_else(|| std::env::var("DATABASE_URL").ok())
-            .expect("database url missing: set `database.url` in hanqing.toml, `DATABASE_URL`, or `HANQING__DATABASE__URL`"),
-        config.database.max_connections,
-    )
-    .await
-    .context(DatabaseSnafu)?;
+    let db =
+        hanqing_database::setup::connect(&config.database_url(), config.database.max_connections)
+            .await
+            .context(DatabaseSnafu)?;
 
     match Cli::parse().command {
         Command::Login { phone } => {

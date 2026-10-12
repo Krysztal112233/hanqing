@@ -72,4 +72,14 @@ impl HanqingConfig {
 
         Ok(config)
     }
+
+    /// Resolve the database URL: `database.url` from config, falling back to
+    /// the `DATABASE_URL` environment variable.
+    pub fn database_url(&self) -> String {
+        self.database
+            .url
+            .clone()
+            .or_else(|| std::env::var("DATABASE_URL").ok())
+            .expect("database url missing: set `database.url` in hanqing.toml, `DATABASE_URL`, or `HANQING__DATABASE__URL`")
+    }
 }

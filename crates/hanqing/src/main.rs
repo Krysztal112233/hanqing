@@ -34,16 +34,10 @@ async fn main() -> Result<(), Error> {
         MissingCredentialsSnafu
     );
 
-    let database_url = config
-        .database
-        .url
-        .clone()
-        .or_else(|| std::env::var("DATABASE_URL").ok())
-        .expect("database url missing: set `database.url` in hanqing.toml, `DATABASE_URL`, or `HANQING__DATABASE__URL`");
-
-    let db = hanqing_database::setup::connect(&database_url, config.database.max_connections)
-        .await
-        .context(DatabaseSnafu)?;
+    let db =
+        hanqing_database::setup::connect(&config.database_url(), config.database.max_connections)
+            .await
+            .context(DatabaseSnafu)?;
     info!("connected to database");
 
     let connection = hanqing_telegram::connect(&config.telegram, db.clone())
@@ -60,24 +54,19 @@ async fn main() -> Result<(), Error> {
         error!("no authorized session; run `hanqing-cli login` first");
         std::process::exit(2);
     };
-    info!(
-        id = me.id().bot_api_dialog_id_unchecked(),
-        name = me.full_name(),
-        "running as"
-    );
-
-    // Behavior settings live in the database (per account); first run
-    // self-initializes defaults. Also the single-account guard: a session
-    // belonging to a different account than the archive aborts here.
-    let settings = AccountSettings::load_or_init(&db, me.id().bot_api_dialog_id_unchecked())
-        .await
-        .context(DatabaseSnafu)?;
-    info!(?settings, "account settings loaded");
-
     let self_id = me
         .id()
         .bot_api_dialog_id()
         .expect("self user has a real id");
+    info!(id = self_id, name = me.full_name(), "running as");
+
+    // Behavior settings live in the database (per account); first run
+    // self-initializes defaults. Also the single-account guard: a session
+    // belonging to a different account than the archive aborts here.
+    let settings = AccountSettings::load_or_init(&db, self_id)
+        .await
+        .context(DatabaseSnafu)?;
+    info!(?settings, "account settings loaded");
 
     // Live updates start before backfill so nothing arriving mid-run is
     // missed; both paths share the same idempotent upserts.
