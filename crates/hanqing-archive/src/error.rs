@@ -11,7 +11,7 @@ pub enum Error {
         location: Location,
     },
 
-    #[snafu(display("database error: {source}"))]
+    #[snafu(display("sea-orm error: {source}"))]
     Db {
         source: sea_orm::DbErr,
         #[snafu(implicit)]

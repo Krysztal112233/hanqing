@@ -219,12 +219,9 @@ async fn flush_batch(
         return Ok(());
     }
 
-    let drained = std::mem::take(batch);
-    let media: Vec<NewMedia> = drained
-        .iter()
-        .filter_map(|(_, media)| media.clone())
-        .collect();
-    let messages: Vec<NewMessage> = drained.into_iter().map(|(msg, _)| msg).collect();
+    let (messages, media): (Vec<NewMessage>, Vec<Option<NewMedia>>) =
+        std::mem::take(batch).into_iter().unzip();
+    let media: Vec<NewMedia> = media.into_iter().flatten().collect();
 
     let txn = db.begin().await.context(DbSnafu)?;
     let count = Messages::save_all(&txn, messages)
@@ -304,14 +301,16 @@ pub async fn scan_existing_media(db: &DatabaseConnection) -> Result<u64, Error> 
             .filter_map(|m| Media::extract(m.chat_id, m.msg_id, &m.raw))
             .collect();
 
-        let page_last = rows.last().map(|m| (m.chat_id, m.msg_id));
+        let full_page = rows.len() as u64 == PAGE;
+        if let Some(m) = rows.last() {
+            last = Some((m.chat_id, m.msg_id));
+        }
         scanned += rows.len() as u64;
         extracted += media.len() as u64;
         Media::save_all(db, media).await.context(DatabaseSnafu)?;
 
-        match page_last {
-            Some(key) if rows.len() as u64 == PAGE => last = Some(key),
-            _ => break,
+        if !full_page {
+            break;
         }
     }
 

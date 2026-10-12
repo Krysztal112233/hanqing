@@ -92,31 +92,25 @@ pub async fn run_update_stream(
 }
 
 async fn handle_update(db: &DatabaseConnection, update: Update, self_id: i64) -> Result<(), Error> {
+    let edited = matches!(&update, Update::MessageEdited(_));
     match update {
-        Update::NewMessage(message) => {
+        Update::NewMessage(message) | Update::MessageEdited(message) => {
             let Some(chat_id) = chat_id_of(&message, self_id) else {
                 return Ok(());
             };
             let (msg, media) = map_message(chat_id, &message, self_id)?;
-            Messages::save_all(db, vec![msg])
-                .await
-                .context(DatabaseSnafu)?;
-            if let Some(media) = media {
-                Media::save_all(db, vec![media])
+            let mut outcome = None;
+            if edited {
+                outcome = Some(
+                    Messages::apply_edit(db, msg, edit_date(&message))
+                        .await
+                        .context(DatabaseSnafu)?,
+                );
+            } else {
+                Messages::save_all(db, vec![msg])
                     .await
                     .context(DatabaseSnafu)?;
             }
-            debug!(chat_id, msg_id = message.id(), "new message archived");
-        }
-        Update::MessageEdited(message) => {
-            let Some(chat_id) = chat_id_of(&message, self_id) else {
-                return Ok(());
-            };
-            let edited_at = edit_date(&message);
-            let (msg, media) = map_message(chat_id, &message, self_id)?;
-            let outcome = Messages::apply_edit(db, msg, edited_at)
-                .await
-                .context(DatabaseSnafu)?;
             if let Some(media) = media {
                 Media::save_all(db, vec![media])
                     .await
@@ -125,17 +119,23 @@ async fn handle_update(db: &DatabaseConnection, update: Update, self_id: i64) ->
             debug!(
                 chat_id,
                 msg_id = message.id(),
+                edited,
                 ?outcome,
-                "message edit archived"
+                "message archived"
             );
         }
         Update::MessageDeleted(deletion) => {
             let msg_ids = deletion.messages();
             match deletion.channel_id() {
                 Some(channel_id) => {
-                    let chat_id = PeerId::channel(channel_id)
-                        .and_then(|p| p.bot_api_dialog_id())
-                        .unwrap_or(channel_id);
+                    // Out-of-range channel ids have no valid chat mapping;
+                    // surface the anomaly instead of writing to a dead id.
+                    let Some(chat_id) =
+                        PeerId::channel(channel_id).and_then(|p| p.bot_api_dialog_id())
+                    else {
+                        warn!(channel_id, "deletion for out-of-range channel id; skipping");
+                        return Ok(());
+                    };
                     let count = Messages::mark_deleted(db, chat_id, msg_ids)
                         .await
                         .context(DatabaseSnafu)?;
