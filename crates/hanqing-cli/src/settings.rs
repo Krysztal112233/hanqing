@@ -63,9 +63,6 @@ pub async fn set(
         .await
         .context(DatabaseSnafu)?;
 
-    let settings = AccountSettingsEntity::load_or_init(db, account_id)
-        .await
-        .context(DatabaseSnafu)?;
     println!("{key} = {}", current(&settings, key)?);
     Ok(())
 }
