@@ -7,17 +7,14 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use grammers_session::types::{
-    ChannelState, DcOption, PeerId, PeerInfo, UpdateState, UpdatesState,
-};
+use grammers_session::types::{DcOption, PeerId, PeerInfo, UpdateState, UpdatesState};
 use grammers_session::{BoxFuture, Session, SessionData};
 use sea_orm::DatabaseConnection;
 use snafu::ResultExt;
-use tokio::sync::Mutex as AsyncMutex;
 
 use hanqing_database::helper::prelude::*;
 use hanqing_database::model::prelude::{
-    SessionDcHome, SessionDcOption, SessionPeer, SessionUpdateState,
+    SessionChannelState, SessionDcHome, SessionDcOption, SessionPeer, SessionUpdateState,
 };
 
 use crate::error::{DatabaseSnafu, PgSessionError, PoisonedSnafu, SerdeSnafu};
@@ -28,8 +25,6 @@ pub struct PgSession {
     /// Fallback datacenter options (statically known DCs) for entries not yet
     /// stored in the database.
     defaults: SessionData,
-    /// Serializes `set_update_state` read-modify-write cycles.
-    state_lock: AsyncMutex<()>,
 }
 
 struct Cache {
@@ -65,7 +60,6 @@ impl PgSession {
                 dc_options,
             }),
             defaults,
-            state_lock: AsyncMutex::new(()),
         })
     }
 }
@@ -179,36 +173,27 @@ impl Session for PgSession {
 
     fn set_update_state(&self, update: UpdateState) -> BoxFuture<'_, Result<(), PgSessionError>> {
         Box::pin(async move {
-            let _guard = self.state_lock.lock().await;
-
-            let mut state = match SessionUpdateState::load(&self.db)
-                .await
-                .context(DatabaseSnafu)?
-            {
-                Some(value) => serde_json::from_value::<UpdatesState>(value).context(SerdeSnafu)?,
-                None => UpdatesState::default(),
-            };
-
+            // Partial updates map to direct column writes — no
+            // read-modify-write, no lock.
             match update {
-                UpdateState::All(new_state) => state = new_state,
+                UpdateState::All(state) => {
+                    let data = serde_json::to_value(&state).context(SerdeSnafu)?;
+                    SessionUpdateState::save_all(&self.db, data)
+                        .await
+                        .context(DatabaseSnafu)
+                }
                 UpdateState::Primary { pts, date, seq } => {
-                    state.pts = pts;
-                    state.date = date;
-                    state.seq = seq;
+                    SessionUpdateState::save_primary(&self.db, pts, date, seq)
+                        .await
+                        .context(DatabaseSnafu)
                 }
-                UpdateState::Secondary { qts } => state.qts = qts,
-                UpdateState::Channel { id, pts } => {
-                    match state.channels.iter_mut().find(|c| c.id == id) {
-                        Some(channel) => channel.pts = pts,
-                        None => state.channels.push(ChannelState { id, pts }),
-                    }
-                }
+                UpdateState::Secondary { qts } => SessionUpdateState::save_qts(&self.db, qts)
+                    .await
+                    .context(DatabaseSnafu),
+                UpdateState::Channel { id, pts } => SessionChannelState::upsert(&self.db, id, pts)
+                    .await
+                    .context(DatabaseSnafu),
             }
-
-            let data = serde_json::to_value(&state).context(SerdeSnafu)?;
-            SessionUpdateState::save(&self.db, data)
-                .await
-                .context(DatabaseSnafu)
         })
     }
 }
