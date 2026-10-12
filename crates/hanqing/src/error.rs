@@ -32,6 +32,13 @@ pub enum Error {
         location: Location,
     },
 
+    #[snafu(display("update stream task failed: {source}"))]
+    Join {
+        source: tokio::task::JoinError,
+        #[snafu(implicit)]
+        location: Location,
+    },
+
     #[snafu(display("archive error: {source}"))]
     Archive {
         source: hanqing_archive::error::Error,
