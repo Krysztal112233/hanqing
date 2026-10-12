@@ -74,16 +74,22 @@ async fn main() -> Result<(), Error> {
         .context(DatabaseSnafu)?;
     info!(?settings, "account settings loaded");
 
+    let self_id = me
+        .id()
+        .bot_api_dialog_id()
+        .expect("self user has a real id");
+
     // Live updates start before backfill so nothing arriving mid-run is
     // missed; both paths share the same idempotent upserts.
     let stream_db = db.clone();
     let stream_client = client.clone();
     let mut stream_task = tokio::spawn(async move {
-        hanqing_archive::run_update_stream(&stream_client, &stream_db, connection.updates).await
+        hanqing_archive::run_update_stream(&stream_client, &stream_db, connection.updates, self_id)
+            .await
     });
 
     if std::env::var_os("HANQING_SKIP_BACKFILL").is_none() {
-        let stats = hanqing_archive::backfill_all(&client, &db)
+        let stats = hanqing_archive::backfill_all(&client, &db, self_id)
             .await
             .context(ArchiveSnafu)?;
         info!(

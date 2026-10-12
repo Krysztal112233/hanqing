@@ -33,6 +33,7 @@ pub async fn run_update_stream(
     client: &Client,
     db: &DatabaseConnection,
     updates: mpsc::Receiver<UpdatesLike>,
+    self_id: i64,
 ) -> Result<(), Error> {
     // catch_up: replay updates received while we were offline.
     let configuration = UpdatesConfiguration {
@@ -55,7 +56,7 @@ pub async fn run_update_stream(
         match stream.next().await {
             Ok(update) => {
                 io_retries = 0;
-                if let Err(err) = handle_update(db, update).await {
+                if let Err(err) = handle_update(db, update, self_id).await {
                     warn!(%err, "failed to archive update; skipping");
                 }
             }
@@ -73,13 +74,13 @@ pub async fn run_update_stream(
     }
 }
 
-async fn handle_update(db: &DatabaseConnection, update: Update) -> Result<(), Error> {
+async fn handle_update(db: &DatabaseConnection, update: Update, self_id: i64) -> Result<(), Error> {
     match update {
         Update::NewMessage(message) => {
-            let Some(chat_id) = chat_id_of(&message) else {
+            let Some(chat_id) = chat_id_of(&message, self_id) else {
                 return Ok(());
             };
-            let (msg, media) = map_message(chat_id, &message)?;
+            let (msg, media) = map_message(chat_id, &message, self_id)?;
             Messages::save_all(db, vec![msg])
                 .await
                 .context(DatabaseSnafu)?;
@@ -91,11 +92,11 @@ async fn handle_update(db: &DatabaseConnection, update: Update) -> Result<(), Er
             debug!(chat_id, msg_id = message.id(), "new message archived");
         }
         Update::MessageEdited(message) => {
-            let Some(chat_id) = chat_id_of(&message) else {
+            let Some(chat_id) = chat_id_of(&message, self_id) else {
                 return Ok(());
             };
             let edited_at = edit_date(&message);
-            let (msg, media) = map_message(chat_id, &message)?;
+            let (msg, media) = map_message(chat_id, &message, self_id)?;
             let outcome = Messages::apply_edit(db, msg, edited_at)
                 .await
                 .context(DatabaseSnafu)?;
@@ -116,7 +117,7 @@ async fn handle_update(db: &DatabaseConnection, update: Update) -> Result<(), Er
             match deletion.channel_id() {
                 Some(channel_id) => {
                     let chat_id = PeerId::channel(channel_id)
-                        .map(|p| p.bot_api_dialog_id_unchecked())
+                        .and_then(|p| p.bot_api_dialog_id())
                         .unwrap_or(channel_id);
                     let count = Messages::mark_deleted(db, chat_id, msg_ids)
                         .await
@@ -138,10 +139,12 @@ async fn handle_update(db: &DatabaseConnection, update: Update) -> Result<(), Er
     Ok(())
 }
 
-fn chat_id_of(message: &Message) -> Option<i64> {
+fn chat_id_of(message: &Message, self_id: i64) -> Option<i64> {
+    // The self user is a sentinel without a real id; Saved Messages maps to
+    // the account's own user id.
     message
         .peer()
-        .map(|peer| peer.id().bot_api_dialog_id_unchecked())
+        .map(|peer| peer.id().bot_api_dialog_id().unwrap_or(self_id))
 }
 
 fn edit_date(message: &Message) -> chrono::DateTime<chrono::FixedOffset> {

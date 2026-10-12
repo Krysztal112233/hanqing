@@ -56,8 +56,9 @@ pub struct BackfillStats {
 pub async fn backfill_all(
     client: &Client,
     db: &DatabaseConnection,
+    self_id: i64,
 ) -> Result<BackfillStats, Error> {
-    let peers = register_dialogs(client, db).await?;
+    let peers = register_dialogs(client, db, self_id).await?;
     let pending = SyncState::find_pending(db).await.context(DatabaseSnafu)?;
 
     let mut stats = BackfillStats {
@@ -74,7 +75,8 @@ pub async fn backfill_all(
             continue;
         };
 
-        let fetched = backfill_chat(client, db, state.chat_id, peer_ref, state.cursor).await?;
+        let fetched =
+            backfill_chat(client, db, state.chat_id, peer_ref, state.cursor, self_id).await?;
         stats.completed_chats += 1;
         stats.messages += fetched;
     }
@@ -87,12 +89,13 @@ pub async fn backfill_all(
 async fn register_dialogs(
     client: &Client,
     db: &DatabaseConnection,
+    self_id: i64,
 ) -> Result<HashMap<i64, PeerRef>, Error> {
     let mut peers = HashMap::new();
     let mut dialogs = client.iter_dialogs();
     while let Some(dialog) = dialogs.next().await.context(InvokeSnafu)? {
         let peer = dialog.peer();
-        let chat_id = peer.id().bot_api_dialog_id_unchecked();
+        let chat_id = peer.id().bot_api_dialog_id().unwrap_or(self_id);
         let peer_ref = peer
             .to_ref()
             .await
@@ -116,6 +119,7 @@ async fn backfill_chat(
     chat_id: i64,
     peer_ref: &PeerRef,
     cursor: Option<i64>,
+    self_id: i64,
 ) -> Result<u64, Error> {
     info!(chat_id, ?cursor, "backfilling chat");
 
@@ -134,7 +138,7 @@ async fn backfill_chat(
             Ok(Some(message)) => {
                 io_retries = 0;
                 oldest = oldest.min(message.id() as i64);
-                batch.push(map_message(chat_id, &message)?);
+                batch.push(map_message(chat_id, &message, self_id)?);
                 total += 1;
                 if batch.len() >= BATCH_SIZE {
                     flush_batch(db, chat_id, &mut batch, oldest).await?;
@@ -233,6 +237,7 @@ async fn flush_batch(
 pub(crate) fn map_message(
     chat_id: i64,
     message: &Message,
+    self_id: i64,
 ) -> Result<(NewMessage, Option<NewMedia>), Error> {
     let raw = serde_json::to_value(&message.raw).context(SerializeSnafu)?;
     let date = DateTime::from_timestamp(
@@ -249,7 +254,9 @@ pub(crate) fn map_message(
             chat_id,
             msg_id: message.id() as i64,
             date,
-            sender_id: message.sender_id().map(|p| p.bot_api_dialog_id_unchecked()),
+            sender_id: message
+                .sender_id()
+                .map(|p| p.bot_api_dialog_id().unwrap_or(self_id)),
             text: message.text().to_string(),
             raw,
         },
