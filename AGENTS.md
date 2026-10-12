@@ -43,6 +43,15 @@ Telegram account via MTProto and archives message history into PostgreSQL.
   JSONB column; only high-frequency fields (chat_id, msg_id, date, sender,
   text) are promoted to indexed columns, so `grammers` upgrades don't force
   schema changes.
+- The daemon is resident: it runs `backfill_all` (history) and
+  `run_update_stream` (live updates) concurrently; both share idempotent
+  upserts. `HANQING_SKIP_BACKFILL=1` runs updates-only (testing).
+- Edit/delete policy: `messages` always holds the latest version with soft
+  markers (`edited_at`/`deleted_at`); superseded versions are archived into
+  `message_versions` (insert-from-current-row, then update, one txn).
+- `session_update_state` is split: scalar pts/qts/date/seq row +
+  `session_channel_state` (per-channel pts), so partial update-state writes
+  are direct UPDATE/UPSERT with no read-modify-write lock.
 - `grammers-tl-types` is a direct dependency with the non-default
   `impl-serde` feature so TL types derive `Serialize`/`Deserialize` (feature
   unification makes `grammers_client` re-exports serializable too). Two

@@ -22,7 +22,7 @@ fmt:
 
 # Reset the Telegram session (clears session_* tables; archived messages are kept).
 reset-session:
-    psql "$DATABASE_URL" -c 'TRUNCATE session_dc_home, session_dc_option, session_peer, session_update_state;'
+    psql "$DATABASE_URL" -c 'TRUNCATE session_dc_home, session_dc_option, session_peer, session_update_state, session_channel_state;'
 
 check:
     cargo test --all -r
