@@ -157,14 +157,16 @@ async fn backfill_chat(
                 // than relying on its internal state after an error.
                 iter = client.iter_messages(*peer_ref).offset_id(oldest as i32);
             }
-            Err(InvocationError::Io(err)) => {
+            // Retry IO errors and transient server errors (5xx RPC codes),
+            // then re-enter the walk from the persisted watermark.
+            Err(err) if is_transient(&err) => {
                 flush_batch(db, chat_id, &mut batch, oldest).await?;
                 io_retries += 1;
                 if io_retries > MAX_IO_RETRIES {
-                    return Err(InvocationError::Io(err)).context(InvokeSnafu);
+                    return Err(err).context(InvokeSnafu);
                 }
                 let delay = 2u64.pow(io_retries).min(60);
-                warn!(chat_id, attempt = io_retries, delay, %err, "io error; reconnecting");
+                warn!(chat_id, attempt = io_retries, delay, %err, "transient error; backing off");
                 tokio::time::sleep(Duration::from_secs(delay)).await;
                 // The sender pool reconnects lazily on the next request;
                 // resume from the persisted watermark.
@@ -183,6 +185,16 @@ async fn backfill_chat(
         .context(DatabaseSnafu)?;
     info!(chat_id, total, "chat backfill complete");
     Ok(total)
+}
+
+/// IO errors and 5xx RPC errors (e.g. -503 Timeout) are transient; other RPC
+/// errors (auth, flood, bad request) must abort the run.
+fn is_transient(err: &InvocationError) -> bool {
+    match err {
+        InvocationError::Io(_) => true,
+        InvocationError::Rpc(rpc) => rpc.code <= -500,
+        _ => false,
+    }
 }
 
 /// Insert the batch (messages + media metadata) and advance the watermark in
@@ -218,7 +230,10 @@ async fn flush_batch(
     Ok(())
 }
 
-fn map_message(chat_id: i64, message: &Message) -> Result<(NewMessage, Option<NewMedia>), Error> {
+pub(crate) fn map_message(
+    chat_id: i64,
+    message: &Message,
+) -> Result<(NewMessage, Option<NewMedia>), Error> {
     let raw = serde_json::to_value(&message.raw).context(SerializeSnafu)?;
     let date = DateTime::from_timestamp(
         message.date().as_second(),

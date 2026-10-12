@@ -45,4 +45,11 @@ pub enum Error {
         #[snafu(implicit)]
         location: Location,
     },
+
+    #[snafu(display("failed to start update stream: {message}"))]
+    StreamSetup {
+        message: String,
+        #[snafu(implicit)]
+        location: Location,
+    },
 }
