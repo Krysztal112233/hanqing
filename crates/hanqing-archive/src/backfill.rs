@@ -124,10 +124,16 @@ async fn backfill_chat(
     info!(chat_id, ?cursor, "backfilling chat");
 
     let mut oldest = cursor.unwrap_or(i64::MAX);
-    let mut iter = client.iter_messages(*peer_ref);
-    if let Some(cursor) = cursor {
-        iter = iter.offset_id(cursor as i32);
-    }
+    // `oldest == i64::MAX` marks a fresh chat; guard every offset_id call,
+    // because `i64::MAX as i32` truncates to -1.
+    let rebuild_iter = |oldest: i64| {
+        let mut iter = client.iter_messages(*peer_ref);
+        if oldest != i64::MAX {
+            iter = iter.offset_id(oldest as i32);
+        }
+        iter
+    };
+    let mut iter = rebuild_iter(oldest);
 
     let mut batch: Vec<(NewMessage, Option<NewMedia>)> = Vec::with_capacity(BATCH_SIZE);
     let mut total = 0u64;
@@ -159,7 +165,7 @@ async fn backfill_chat(
                 tokio::time::sleep(Duration::from_secs(u64::from(wait) + 1)).await;
                 // Rebuild the iterator from the persisted watermark rather
                 // than relying on its internal state after an error.
-                iter = client.iter_messages(*peer_ref).offset_id(oldest as i32);
+                iter = rebuild_iter(oldest);
             }
             // Retry IO errors and transient server errors (5xx RPC codes),
             // then re-enter the walk from the persisted watermark.
@@ -174,7 +180,7 @@ async fn backfill_chat(
                 tokio::time::sleep(Duration::from_secs(delay)).await;
                 // The sender pool reconnects lazily on the next request;
                 // resume from the persisted watermark.
-                iter = client.iter_messages(*peer_ref).offset_id(oldest as i32);
+                iter = rebuild_iter(oldest);
             }
             Err(err) => {
                 flush_batch(db, chat_id, &mut batch, oldest).await?;
