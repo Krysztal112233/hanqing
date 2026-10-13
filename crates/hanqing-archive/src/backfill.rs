@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use chrono::DateTime;
 use grammers_client::Client;
+use grammers_client::client::MessageIter;
 use grammers_client::message::Message;
 use grammers_client::sender::InvocationError;
 use grammers_client::session::types::PeerRef;
@@ -31,14 +32,12 @@ use crate::error::{
     DatabaseSnafu, DbSnafu, Error, InvokeSnafu, PeerNotCachedSnafu, PeerResolveSnafu,
     SerializeSnafu,
 };
+use backon::RetryableWithContext;
+
+use crate::retry::{backoff, is_transient};
 
 /// Messages per transactional insert + cursor checkpoint.
 const BATCH_SIZE: usize = 200;
-
-/// Consecutive IO errors tolerated before aborting the run. Telegram kills
-/// idle connections routinely; reconnecting and resuming from the persisted
-/// watermark is almost always the right response.
-const MAX_IO_RETRIES: u32 = 10;
 
 /// Flood waits longer than this pause the chat until the next run instead of
 /// sleeping.
@@ -137,12 +136,24 @@ async fn backfill_chat(
 
     let mut batch: Vec<(NewMessage, Option<NewMedia>)> = Vec::with_capacity(BATCH_SIZE);
     let mut total = 0u64;
-    let mut io_retries = 0u32;
-
     loop {
-        match iter.next().await {
+        // The iterator moves through the retry context; a transient failure
+        // rebuilds it from the watermark for the next attempt.
+        let (iter_back, next) = (|mut iter: MessageIter| async move {
+            match iter.next().await {
+                Err(err) if is_transient(&err) => (rebuild_iter(oldest), Err(err)),
+                other => (iter, other),
+            }
+        })
+        .retry(backoff())
+        .context(iter)
+        .when(is_transient)
+        .notify(|err, delay| warn!(chat_id, %err, ?delay, "transient error; backing off"))
+        .await;
+        iter = iter_back;
+
+        match next {
             Ok(Some(message)) => {
-                io_retries = 0;
                 oldest = oldest.min(message.id() as i64);
                 batch.push(map_message(chat_id, &message, self_id)?);
                 total += 1;
@@ -167,21 +178,6 @@ async fn backfill_chat(
                 // than relying on its internal state after an error.
                 iter = rebuild_iter(oldest);
             }
-            // Retry IO errors and transient server errors (5xx RPC codes),
-            // then re-enter the walk from the persisted watermark.
-            Err(err) if is_transient(&err) => {
-                flush_batch(db, chat_id, &mut batch, oldest).await?;
-                io_retries += 1;
-                if io_retries > MAX_IO_RETRIES {
-                    return Err(err).context(InvokeSnafu);
-                }
-                let delay = 2u64.pow(io_retries).min(60);
-                warn!(chat_id, attempt = io_retries, delay, %err, "transient error; backing off");
-                tokio::time::sleep(Duration::from_secs(delay)).await;
-                // The sender pool reconnects lazily on the next request;
-                // resume from the persisted watermark.
-                iter = rebuild_iter(oldest);
-            }
             Err(err) => {
                 flush_batch(db, chat_id, &mut batch, oldest).await?;
                 return Err(err).context(InvokeSnafu);
@@ -195,16 +191,6 @@ async fn backfill_chat(
         .context(DatabaseSnafu)?;
     info!(chat_id, total, "chat backfill complete");
     Ok(total)
-}
-
-/// IO errors and 5xx RPC errors (e.g. -503 Timeout) are transient; other RPC
-/// errors (auth, flood, bad request) must abort the run.
-fn is_transient(err: &InvocationError) -> bool {
-    match err {
-        InvocationError::Io(_) => true,
-        InvocationError::Rpc(rpc) => rpc.code <= -500,
-        _ => false,
-    }
 }
 
 /// Insert the batch (messages + media metadata) and advance the watermark in

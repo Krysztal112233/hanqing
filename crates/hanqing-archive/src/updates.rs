@@ -9,8 +9,9 @@ use std::time::{Duration, Instant};
 
 use chrono::DateTime;
 use grammers_client::Client;
+use grammers_client::client::UpdateStream;
 use grammers_client::message::Message;
-use grammers_client::sender::{InvocationError, UpdatesConfiguration};
+use grammers_client::sender::UpdatesConfiguration;
 use grammers_client::session::types::PeerId;
 use grammers_client::session::updates::UpdatesLike;
 use grammers_client::update::Update;
@@ -21,12 +22,11 @@ use snafu::ResultExt;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+use backon::RetryableWithContext;
+
 use crate::backfill::map_message;
 use crate::error::{DatabaseSnafu, Error, InvokeSnafu, StreamSetupSnafu};
-
-/// Consecutive IO errors tolerated before giving up; the sender pool
-/// reconnects lazily, so brief network blips should just be slept off.
-const MAX_IO_RETRIES: u32 = 10;
+use crate::retry::{backoff, is_transient};
 
 /// grammers persists update state only when asked (`sync_update_state`), so
 /// the stream snapshots it periodically. On restart, catch_up replays from
@@ -62,31 +62,32 @@ pub async fn run_update_stream(
     }
     let mut last_sync = Instant::now();
 
-    let mut io_retries = 0u32;
     loop {
-        match stream.next().await {
-            Ok(update) => {
-                io_retries = 0;
-                if let Err(err) = handle_update(db, update, self_id).await {
-                    warn!(%err, "failed to archive update; skipping");
-                }
-                if last_sync.elapsed() >= STATE_SYNC_INTERVAL {
-                    if let Err(err) = stream.sync_update_state().await {
-                        warn!(%err, "failed to sync update state");
-                    }
-                    last_sync = Instant::now();
-                }
-            }
-            Err(InvocationError::Io(err)) => {
-                io_retries += 1;
-                if io_retries > MAX_IO_RETRIES {
-                    return Err(InvocationError::Io(err)).context(InvokeSnafu);
-                }
-                let delay = 2u64.pow(io_retries).min(60);
-                warn!(attempt = io_retries, delay, %err, "update stream io error; backing off");
-                tokio::time::sleep(Duration::from_secs(delay)).await;
-            }
+        // The stream owns the connection state, so it moves through the
+        // retry context rather than being rebuilt per attempt.
+        let (stream_back, update) = (|mut stream: UpdateStream| async move {
+            let update = stream.next().await;
+            (stream, update)
+        })
+        .retry(backoff())
+        .context(stream)
+        .when(is_transient)
+        .notify(|err, delay| warn!(%err, ?delay, "transient stream error; backing off"))
+        .await;
+        stream = stream_back;
+        let update = match update {
+            Ok(update) => update,
             Err(err) => return Err(err).context(InvokeSnafu),
+        };
+
+        if let Err(err) = handle_update(db, update, self_id).await {
+            warn!(%err, "failed to archive update; skipping");
+        }
+        if last_sync.elapsed() >= STATE_SYNC_INTERVAL {
+            if let Err(err) = stream.sync_update_state().await {
+                warn!(%err, "failed to sync update state");
+            }
+            last_sync = Instant::now();
         }
     }
 }
