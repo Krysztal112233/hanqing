@@ -34,7 +34,7 @@ pub async fn connect(config: &TelegramConfig, db: DatabaseConnection) -> Result<
         handle,
         updates,
         ..
-    } = SenderPool::new(session, config.api_id);
+    } = SenderPool::new(session, config.api_id.get());
     let client = Client::new(handle);
     let _runner = tokio::spawn(runner.run());
 

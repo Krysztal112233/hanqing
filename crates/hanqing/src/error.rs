@@ -10,14 +10,6 @@ pub enum Error {
         location: Location,
     },
 
-    #[snafu(display(
-        "telegram credentials missing: set `HANQING__TELEGRAM__API_ID` and `HANQING__TELEGRAM__API_HASH`"
-    ))]
-    MissingCredentials {
-        #[snafu(implicit)]
-        location: Location,
-    },
-
     #[snafu(display("database error: {source}"))]
     Database {
         source: hanqing_database::error::Error,

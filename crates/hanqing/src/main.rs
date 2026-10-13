@@ -1,9 +1,8 @@
 use dotenvy::dotenv;
 use mimalloc::MiMalloc;
-use snafu::{ResultExt, ensure};
+use snafu::ResultExt;
 use tracing::{error, info, warn};
 
-use hanqing::error::MissingCredentialsSnafu;
 use hanqing::error::{ArchiveSnafu, ConfigSnafu, DatabaseSnafu, Error, JoinSnafu, TelegramSnafu};
 use hanqing_config::HanqingConfig;
 use hanqing_database::helper::prelude::*;
@@ -28,11 +27,6 @@ async fn main() -> Result<(), Error> {
     }
 
     let config = HanqingConfig::new().context(ConfigSnafu)?;
-
-    ensure!(
-        config.telegram.api_id != 0 && !config.telegram.api_hash.is_empty(),
-        MissingCredentialsSnafu
-    );
 
     let db =
         hanqing_database::setup::connect(&config.database_url(), config.database.max_connections)

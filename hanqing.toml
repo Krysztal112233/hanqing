@@ -1,14 +1,5 @@
-# hanqing — Telegram → PostgreSQL archive daemon.
 # Secrets (api_hash, database url) belong in .env via HANQING__-prefixed
 # overrides (`__` separator), never in this committed file.
 
-[telegram]
-# Obtain from https://my.telegram.org/apps
-api_id = 0
-api_hash = ""
-# phone 不是 daemon 配置；登录输入由 hanqing-cli login 收集
-
 [database]
-# url = "postgres://hanqing@postgresql.lan/hanqing"  # password via env only
 max_connections = 8
-

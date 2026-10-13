@@ -1,6 +1,8 @@
+use std::num::NonZero;
+
 use crate::error::{ConfigSnafu, Error};
 use config::Config;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use snafu::ResultExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,10 +15,20 @@ pub struct HanqingConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TelegramConfig {
-    /// From https://my.telegram.org/apps
-    pub api_id: i32,
+    /// From https://my.telegram.org/apps. Nonzero is enforced at the type
+    /// level: `0` fails to parse, no runtime check needed.
+    pub api_id: NonZero<i32>,
     /// Never commit a real value; override via `HANQING__TELEGRAM__API_HASH`.
+    #[serde(deserialize_with = "non_empty_string")]
     pub api_hash: String,
+}
+
+fn non_empty_string<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let s = String::deserialize(deserializer)?;
+    if s.is_empty() {
+        return Err(serde::de::Error::custom("must not be empty"));
+    }
+    Ok(s)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
