@@ -10,6 +10,9 @@ use snafu::ResultExt;
 pub struct HanqingConfig {
     pub telegram: TelegramConfig,
     pub database: DatabaseConfig,
+    /// Media object storage; absent until the downloader is configured.
+    #[serde(default)]
+    pub s3: Option<S3Config>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +32,25 @@ fn non_empty_string<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String
         return Err(serde::de::Error::custom("must not be empty"));
     }
     Ok(s)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct S3Config {
+    #[serde(deserialize_with = "non_empty_string")]
+    pub endpoint: String,
+    #[serde(deserialize_with = "non_empty_string")]
+    pub bucket: String,
+    #[serde(default = "default_region")]
+    pub region: String,
+    #[serde(deserialize_with = "non_empty_string")]
+    pub access_key_id: String,
+    #[serde(deserialize_with = "non_empty_string")]
+    pub secret_access_key: String,
+}
+
+fn default_region() -> String {
+    "us-east-1".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
