@@ -63,16 +63,36 @@ async fn main() -> Result<(), Error> {
     info!(?settings, "account settings loaded");
 
     // Live updates start before backfill so nothing arriving mid-run is
-    // missed; both paths share the same idempotent upserts.
+    // missed; both paths share the same idempotent upserts. Media download
+    // tasks are enqueued at archive time when S3 storage is configured.
+    let enqueue_media = config.s3.is_some();
     let stream_db = db.clone();
     let stream_client = client.clone();
     let mut stream_task = tokio::spawn(async move {
-        hanqing_archive::run_update_stream(&stream_client, &stream_db, connection.updates, self_id)
-            .await
+        hanqing_archive::run_update_stream(
+            &stream_client,
+            &stream_db,
+            connection.updates,
+            self_id,
+            enqueue_media,
+        )
+        .await
     });
 
+    // Workers (media downloader, ...) self-register via linkme and decide
+    // themselves whether config enables them; they run as detached tasks —
+    // a worker failure must not take down archiving.
+    let workers = hanqing_worker::spawn_all(&hanqing_worker::WorkerContext {
+        client: client.clone(),
+        session: connection.session.clone(),
+        db: db.clone(),
+        config: config.clone(),
+        self_id,
+    });
+    info!(?workers, "workers spawned");
+
     if std::env::var_os("HANQING_SKIP_BACKFILL").is_none() {
-        let stats = hanqing_archive::backfill_all(&client, &db, self_id)
+        let stats = hanqing_archive::backfill_all(&client, &db, self_id, enqueue_media)
             .await
             .context(ArchiveSnafu)?;
         info!(

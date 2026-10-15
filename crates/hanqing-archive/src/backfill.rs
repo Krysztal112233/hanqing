@@ -52,10 +52,15 @@ pub struct BackfillStats {
 
 /// Enumerate all dialogs into `sync_state`, then backfill every pending
 /// (unfinished, enabled) chat.
+///
+/// `enqueue_media` additionally dispatches every extracted media row into
+/// the pgmq download queue (same transaction as the insert); the daemon
+/// enables it when S3 storage is configured.
 pub async fn backfill_all(
     client: &Client,
     db: &DatabaseConnection,
     self_id: i64,
+    enqueue_media: bool,
 ) -> Result<BackfillStats, Error> {
     let peers = register_dialogs(client, db, self_id).await?;
     let pending = SyncState::find_pending(db).await.context(DatabaseSnafu)?;
@@ -74,8 +79,16 @@ pub async fn backfill_all(
             continue;
         };
 
-        let fetched =
-            backfill_chat(client, db, state.chat_id, peer_ref, state.cursor, self_id).await?;
+        let fetched = backfill_chat(
+            client,
+            db,
+            state.chat_id,
+            peer_ref,
+            state.cursor,
+            self_id,
+            enqueue_media,
+        )
+        .await?;
         stats.completed_chats += 1;
         stats.messages += fetched;
     }
@@ -119,6 +132,7 @@ async fn backfill_chat(
     peer_ref: &PeerRef,
     cursor: Option<i64>,
     self_id: i64,
+    enqueue_media: bool,
 ) -> Result<u64, Error> {
     info!(chat_id, ?cursor, "backfilling chat");
 
@@ -158,13 +172,13 @@ async fn backfill_chat(
                 batch.push(map_message(chat_id, &message, self_id)?);
                 total += 1;
                 if batch.len() >= BATCH_SIZE {
-                    flush_batch(db, chat_id, &mut batch, oldest).await?;
+                    flush_batch(db, chat_id, &mut batch, oldest, enqueue_media).await?;
                 }
             }
             Ok(None) => break,
             Err(InvocationError::Rpc(err)) if err.name == "FLOOD_WAIT" => {
                 let wait = err.value.unwrap_or(30);
-                flush_batch(db, chat_id, &mut batch, oldest).await?;
+                flush_batch(db, chat_id, &mut batch, oldest, enqueue_media).await?;
                 if wait > MAX_FLOOD_WAIT_SECS {
                     warn!(
                         chat_id,
@@ -179,13 +193,13 @@ async fn backfill_chat(
                 iter = rebuild_iter(oldest);
             }
             Err(err) => {
-                flush_batch(db, chat_id, &mut batch, oldest).await?;
+                flush_batch(db, chat_id, &mut batch, oldest, enqueue_media).await?;
                 return Err(err).context(InvokeSnafu);
             }
         }
     }
 
-    flush_batch(db, chat_id, &mut batch, oldest).await?;
+    flush_batch(db, chat_id, &mut batch, oldest, enqueue_media).await?;
     SyncState::mark_done(db, chat_id)
         .await
         .context(DatabaseSnafu)?;
@@ -194,12 +208,15 @@ async fn backfill_chat(
 }
 
 /// Insert the batch (messages + media metadata) and advance the watermark in
-/// one transaction.
+/// one transaction. With `enqueue_media`, download tasks are dispatched into
+/// the pgmq queue in the same transaction, so a task never exists without
+/// its registry row.
 async fn flush_batch(
     db: &DatabaseConnection,
     chat_id: i64,
     batch: &mut Vec<(NewMessage, Option<NewMedia>)>,
     oldest: i64,
+    enqueue_media: bool,
 ) -> Result<(), Error> {
     if batch.is_empty() {
         return Ok(());
@@ -208,12 +225,18 @@ async fn flush_batch(
     let (messages, media): (Vec<NewMessage>, Vec<Option<NewMedia>>) =
         std::mem::take(batch).into_iter().unzip();
     let media: Vec<NewMedia> = media.into_iter().flatten().collect();
+    let file_ids: Vec<i64> = media.iter().map(|m| m.file_id).collect();
 
     let txn = db.begin().await.context(DbSnafu)?;
     let count = Messages::save_all(&txn, messages)
         .await
         .context(DatabaseSnafu)?;
     let media_count = Media::save_all(&txn, media).await.context(DatabaseSnafu)?;
+    if enqueue_media {
+        hanqing_database::queue::send_batch(&txn, &file_ids)
+            .await
+            .context(DatabaseSnafu)?;
+    }
     SyncState::update_cursor(&txn, chat_id, oldest)
         .await
         .context(DatabaseSnafu)?;

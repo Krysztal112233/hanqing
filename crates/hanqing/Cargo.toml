@@ -17,3 +17,4 @@ hanqing-archive.workspace = true
 hanqing-config.workspace = true
 hanqing-database.workspace = true
 hanqing-telegram.workspace = true
+hanqing-worker.workspace = true

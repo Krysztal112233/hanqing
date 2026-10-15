@@ -17,7 +17,7 @@ use grammers_client::session::updates::UpdatesLike;
 use grammers_client::update::Update;
 use hanqing_database::helper::prelude::*;
 use hanqing_database::model::prelude::{Media, Messages};
-use sea_orm::DatabaseConnection;
+use sea_orm::{DatabaseConnection, TransactionTrait as _};
 use snafu::ResultExt;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -25,7 +25,7 @@ use tracing::{debug, info, warn};
 use backon::RetryableWithContext;
 
 use crate::backfill::map_message;
-use crate::error::{DatabaseSnafu, Error, InvokeSnafu, StreamSetupSnafu};
+use crate::error::{DatabaseSnafu, DbSnafu, Error, InvokeSnafu, StreamSetupSnafu};
 use hanqing_telegram::retry::{backoff, is_transient};
 
 /// grammers persists update state only when asked (`sync_update_state`), so
@@ -34,11 +34,16 @@ use hanqing_telegram::retry::{backoff, is_transient};
 const STATE_SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Follow the live update stream forever, archiving message events.
+///
+/// `enqueue_media` additionally dispatches every extracted media row into
+/// the pgmq download queue (same transaction as the insert); the daemon
+/// enables it when S3 storage is configured.
 pub async fn run_update_stream(
     client: &Client,
     db: &DatabaseConnection,
     updates: mpsc::Receiver<UpdatesLike>,
     self_id: i64,
+    enqueue_media: bool,
 ) -> Result<(), Error> {
     // catch_up: replay updates received while we were offline.
     let configuration = UpdatesConfiguration {
@@ -80,7 +85,7 @@ pub async fn run_update_stream(
             Err(err) => return Err(err).context(InvokeSnafu),
         };
 
-        if let Err(err) = handle_update(db, update, self_id).await {
+        if let Err(err) = handle_update(db, update, self_id, enqueue_media).await {
             warn!(%err, "failed to archive update; skipping");
         }
         if last_sync.elapsed() >= STATE_SYNC_INTERVAL {
@@ -92,7 +97,12 @@ pub async fn run_update_stream(
     }
 }
 
-async fn handle_update(db: &DatabaseConnection, update: Update, self_id: i64) -> Result<(), Error> {
+async fn handle_update(
+    db: &DatabaseConnection,
+    update: Update,
+    self_id: i64,
+    enqueue_media: bool,
+) -> Result<(), Error> {
     let edited = matches!(&update, Update::MessageEdited(_));
     match update {
         Update::NewMessage(message) | Update::MessageEdited(message) => {
@@ -113,9 +123,20 @@ async fn handle_update(db: &DatabaseConnection, update: Update, self_id: i64) ->
                     .context(DatabaseSnafu)?;
             }
             if let Some(media) = media {
-                Media::save_all(db, vec![media])
+                // Media row + download task commit together: a task never
+                // exists without its registry row (and vice versa the row
+                // is the task's payload source).
+                let file_id = media.file_id;
+                let txn = db.begin().await.context(DbSnafu)?;
+                Media::save_all(&txn, vec![media])
                     .await
                     .context(DatabaseSnafu)?;
+                if enqueue_media {
+                    hanqing_database::queue::send_batch(&txn, &[file_id])
+                        .await
+                        .context(DatabaseSnafu)?;
+                }
+                txn.commit().await.context(DbSnafu)?;
             }
             debug!(
                 chat_id,
