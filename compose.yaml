@@ -4,8 +4,8 @@
 #   docker compose run --rm cli login     # interactive sign-in (starts db first)
 #   docker compose up -d daemon           # archive!
 #
-# Session lives in Postgres, media in the `media` volume: both survive
-# restarts and image rebuilds.
+# Session lives in Postgres; media files go to S3 (HANQING__S3__*). Both
+# survive restarts and image rebuilds.
 #
 # Internal DB credentials default to hanqing/hanqing/hanqing (db is not
 # published to the host); set POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
@@ -14,7 +14,10 @@
 
 services:
   db:
-    image: groonga/pgroonga:4.1.0-debian-18
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-hanqing}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hanqing}
@@ -29,7 +32,10 @@ services:
     restart: unless-stopped
 
   migrate:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
     entrypoint: ["migration", "up"]
     env_file: .env
     environment:
@@ -41,15 +47,16 @@ services:
     restart: "no"
 
   daemon:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
     entrypoint: ["hanqing"]
     env_file: .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-hanqing}:${POSTGRES_PASSWORD:-hanqing}@db:5432/${POSTGRES_DB:-hanqing}
       HANQING__DATABASE__URL: postgres://${POSTGRES_USER:-hanqing}:${POSTGRES_PASSWORD:-hanqing}@db:5432/${POSTGRES_DB:-hanqing}
       RUST_LOG: ${RUST_LOG:-info,hanqing=debug}
-    volumes:
-      - media:/app/media
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -59,7 +66,10 @@ services:
   # (no profile: `up -d` would start it once and it exits immediately — set
   # profiles if that noise bothers you)
   cli:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
     entrypoint: ["hanqing-cli"]
     env_file: .env
     environment:
@@ -72,4 +82,3 @@ services:
 
 volumes:
   pgdata:
-  media:
