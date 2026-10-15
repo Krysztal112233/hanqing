@@ -7,6 +7,7 @@ members = [
 	"crates/hanqing-config",
 	"crates/hanqing-database",
 	"crates/hanqing-telegram",
+	"crates/hanqing-worker",
 	"crates/migration",
 ]
 
@@ -37,6 +38,7 @@ hanqing-cli = { path = "./crates/hanqing-cli/" }
 hanqing-config = { path = "./crates/hanqing-config/" }
 hanqing-database = { path = "./crates/hanqing-database/" }
 hanqing-telegram = { path = "./crates/hanqing-telegram/" }
+hanqing-worker = { path = "./crates/hanqing-worker/" }
 migration = { path = "./crates/migration/" }
 
 # grammers: crates.io releases lag behind master (TL layer updates), pin a git rev.

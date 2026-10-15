@@ -1,0 +1,20 @@
+[package]
+name = "hanqing-worker"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+linkme = "0.3"
+rust-s3 = { version = "0.38", default-features = false, features = [
+	"tokio-rustls-tls-ring",
+	"fail-on-err",
+] }
+sea-orm.workspace = true
+snafu.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+grammers-client.workspace = true
+hanqing-config.workspace = true
+hanqing-database.workspace = true
+hanqing-telegram.workspace = true
