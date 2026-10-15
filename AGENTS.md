@@ -26,7 +26,15 @@ Telegram account via MTProto and archives message history into PostgreSQL.
 - `crates/hanqing-database` — SeaORM entities (`src/model/`, generated) and
   connection setup.
 - `crates/hanqing-telegram` — `grammers` client wrapper: connect, sign-in,
-  message/dialog iteration, media download.
+  message/dialog iteration, session storage, shared retry policy (`retry.rs`).
+- `crates/hanqing-archive` — the archive core: backfill and live update
+  stream (idempotent upserts, edit/delete versioning).
+- `crates/hanqing-worker` — resident background workers (media downloader,
+  ...), one module per worker. Workers self-register into a `linkme`
+  distributed slice (`#[distributed_slice(WORKERS)]`); the daemon spawns them
+  all via `spawn_all` with a `WorkerContext`. A worker decides itself whether
+  config enables it and must never take down archiving (detached tasks,
+  errors logged not propagated).
 - `crates/migration` — SeaORM migrations, created exclusively via
   `sea-orm-cli migrate generate` (never hand-written files).
 
@@ -60,6 +68,13 @@ Telegram account via MTProto and archives message history into PostgreSQL.
 {...}}`) — account for the nesting when querying inside JSONB.
 - Media binary payloads never go into JSONB; they belong on the filesystem or
   object storage with a path reference in the database.
+- Media pipeline: the `media` table is the registry and final state; the pgmq
+  `media_download` queue carries in-flight tasks (visibility timeout = crash
+  recovery, `read_ct` = attempt counter). Archiving enqueues row + task in
+  one transaction when S3 is configured; the daemon's media downloader
+  worker consumes it while `media.download_enabled` is set, stores objects
+  at `media/<kind>/<file_id>`, and re-fetches each message before
+  downloading (`file_reference` expires). Backlog bootstrap: `just enqueue-media`.
 - Enum-like DB columns use real PostgreSQL enum types; `sea-orm-cli`
   generates `DeriveActiveEnum` types (`model/sea_orm_active_enums.rs`) and
   helpers use those generated enums directly.
