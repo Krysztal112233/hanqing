@@ -31,6 +31,12 @@ enum Command {
     /// no Telegram connection).
     ScanMedia,
 
+    /// Media download queue management (pgmq-backed; the daemon consumes it).
+    Media {
+        #[command(subcommand)]
+        command: MediaCommand,
+    },
+
     /// View and adjust per-account behavior settings (stored in PostgreSQL).
     Settings {
         #[command(subcommand)]
@@ -42,6 +48,16 @@ enum Command {
         #[command(subcommand)]
         command: ChatsCommand,
     },
+}
+
+#[derive(Subcommand)]
+enum MediaCommand {
+    /// Enqueue every pending media row into the download queue. Run once
+    /// when enabling downloads on an existing archive; media archived
+    /// afterwards is enqueued by the daemon itself.
+    EnqueuePending,
+    /// Show media status counts and download queue metrics.
+    Stats,
 }
 
 #[derive(Subcommand)]
@@ -100,6 +116,13 @@ async fn main() -> Result<(), Error> {
                 .context(ArchiveSnafu)?;
             info!(count, "media scan done");
         }
+        Command::Media { command } => match command {
+            MediaCommand::EnqueuePending => {
+                let count = hanqing_cli::media::enqueue_pending(&db).await?;
+                info!(count, "pending media enqueued");
+            }
+            MediaCommand::Stats => hanqing_cli::media::stats(&db).await?,
+        },
         Command::Settings { command } => match command {
             SettingsCommand::Show => hanqing_cli::settings::show(&db, &config.telegram).await?,
             SettingsCommand::Set { key, value } => {
