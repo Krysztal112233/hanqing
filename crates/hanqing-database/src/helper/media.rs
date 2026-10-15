@@ -6,14 +6,17 @@
 //! the queue.
 
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveValue::Set, ConnectionTrait, EntityTrait as _};
+use sea_orm::{
+    ActiveModelTrait as _, ActiveValue::Set, ColumnTrait as _, ConnectionTrait, EntityTrait as _,
+    QueryFilter as _, QueryOrder as _, QuerySelect as _,
+};
 use serde_json::Value;
 use snafu::ResultExt;
 
 use crate::error::{DatabaseSnafu, Error};
-use crate::model::media::{ActiveModel, Column};
+use crate::model::media::{ActiveModel, Column, Model};
 use crate::model::prelude::Media;
-use crate::model::sea_orm_active_enums::MediaKind;
+use crate::model::sea_orm_active_enums::{MediaKind, MediaStatus};
 
 #[derive(Debug, Clone)]
 pub struct NewMedia {
@@ -151,6 +154,89 @@ pub trait MediaHelper {
             .context(DatabaseSnafu)?;
 
         Ok(count)
+    }
+
+    /// One media row by primary key.
+    async fn find_one(db: &impl ConnectionTrait, file_id: i64) -> Result<Option<Model>, Error> {
+        Media::find_by_id(file_id)
+            .one(db)
+            .await
+            .context(DatabaseSnafu)
+    }
+
+    /// `file_id`s of `pending` rows after `after`, keyset-paginated. Backs
+    /// the CLI backlog enqueue into the download queue.
+    async fn find_pending_ids(
+        db: &impl ConnectionTrait,
+        after: i64,
+        limit: u64,
+    ) -> Result<Vec<i64>, Error> {
+        Media::find()
+            .select_only()
+            .column(Column::FileId)
+            .filter(Column::Status.eq(MediaStatus::Pending))
+            .filter(Column::FileId.gt(after))
+            .order_by_asc(Column::FileId)
+            .limit(limit)
+            .into_tuple::<i64>()
+            .all(db)
+            .await
+            .context(DatabaseSnafu)
+    }
+
+    /// Per-status row and byte counts (unknown sizes excluded from bytes).
+    async fn status_counts(db: &impl ConnectionTrait) -> Result<Vec<(String, i64, i64)>, Error> {
+        let rows = db
+            .query_all_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Postgres,
+                "SELECT status::text, count(*)::bigint, \
+                 coalesce(sum(size_bytes), 0)::bigint AS bytes \
+                 FROM media GROUP BY status ORDER BY status",
+            ))
+            .await
+            .context(DatabaseSnafu)?;
+        rows.iter()
+            .map(|row| {
+                Ok((
+                    row.try_get("", "status").context(DatabaseSnafu)?,
+                    row.try_get("", "count").context(DatabaseSnafu)?,
+                    row.try_get("", "bytes").context(DatabaseSnafu)?,
+                ))
+            })
+            .collect()
+    }
+
+    /// Persist a successful download: final status plus the object key.
+    async fn mark_done(db: &impl ConnectionTrait, file_id: i64, key: &str) -> Result<(), Error> {
+        ActiveModel {
+            file_id: Set(file_id),
+            status: Set(MediaStatus::Done),
+            path: Set(Some(key.to_string())),
+            downloaded_at: Set(Some(chrono::Utc::now().fixed_offset())),
+            ..Default::default()
+        }
+        .update(db)
+        .await
+        .context(DatabaseSnafu)?;
+        Ok(())
+    }
+
+    /// Persist a terminal (`skipped`/`failed`) or in-flight (`downloading`)
+    /// state.
+    async fn mark_state(
+        db: &impl ConnectionTrait,
+        file_id: i64,
+        status: MediaStatus,
+    ) -> Result<(), Error> {
+        ActiveModel {
+            file_id: Set(file_id),
+            status: Set(status),
+            ..Default::default()
+        }
+        .update(db)
+        .await
+        .context(DatabaseSnafu)?;
+        Ok(())
     }
 }
 
