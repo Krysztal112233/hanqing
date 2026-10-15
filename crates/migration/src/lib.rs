@@ -8,6 +8,7 @@ mod m20261011_150904_create_media_table;
 mod m20261011_165847_archive_controls;
 mod m20261011_180030_message_versions;
 mod m20261011_180030_split_session_update_state;
+mod m20261015_031410_create_media_queue;
 
 pub struct Migrator;
 
@@ -23,6 +24,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261011_165847_archive_controls::Migration),
             Box::new(m20261011_180030_message_versions::Migration),
             Box::new(m20261011_180030_split_session_update_state::Migration),
+            Box::new(m20261015_031410_create_media_queue::Migration),
         ]
     }
 }
