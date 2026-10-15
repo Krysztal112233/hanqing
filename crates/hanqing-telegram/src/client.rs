@@ -15,6 +15,10 @@ use crate::session::PgSession;
 /// A connected client plus the raw update receiver for the update stream.
 pub struct Connection {
     pub client: Client,
+    /// Handle to the session store (the client shares it with the sender
+    /// pool). Useful for direct session queries, e.g. resolving a `PeerRef`
+    /// from a cached peer via `Session::peer_ref`.
+    pub session: Arc<PgSession>,
     /// Feed into [`Client::stream_updates`]; dropped receivers disable update
     /// reception (fine for short-lived commands like `login`).
     pub updates: mpsc::Receiver<UpdatesLike>,
@@ -34,11 +38,15 @@ pub async fn connect(config: &TelegramConfig, db: DatabaseConnection) -> Result<
         handle,
         updates,
         ..
-    } = SenderPool::new(session, config.api_id.get());
+    } = SenderPool::new(session.clone(), config.api_id.get());
     let client = Client::new(handle);
     let _runner = tokio::spawn(runner.run());
 
-    Ok(Connection { client, updates })
+    Ok(Connection {
+        client,
+        session,
+        updates,
+    })
 }
 
 /// The signed-in user when the stored session is authorized, else `None`.

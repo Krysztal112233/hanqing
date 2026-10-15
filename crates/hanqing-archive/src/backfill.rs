@@ -34,7 +34,7 @@ use crate::error::{
 };
 use backon::RetryableWithContext;
 
-use crate::retry::{backoff, is_transient};
+use hanqing_telegram::retry::{backoff, is_transient};
 
 /// Messages per transactional insert + cursor checkpoint.
 const BATCH_SIZE: usize = 200;

@@ -26,7 +26,7 @@ use backon::RetryableWithContext;
 
 use crate::backfill::map_message;
 use crate::error::{DatabaseSnafu, Error, InvokeSnafu, StreamSetupSnafu};
-use crate::retry::{backoff, is_transient};
+use hanqing_telegram::retry::{backoff, is_transient};
 
 /// grammers persists update state only when asked (`sync_update_state`), so
 /// the stream snapshots it periodically. On restart, catch_up replays from

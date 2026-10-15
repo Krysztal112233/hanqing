@@ -1,6 +1,5 @@
 pub mod backfill;
 pub mod error;
-mod retry;
 pub mod updates;
 
 pub use backfill::*;
