@@ -3,8 +3,19 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    EnumIter,
+    DeriveActiveEnum,
+    Serialize,
+    Deserialize,
+    strum :: Display,
+)]
 #[sea_orm(rs_type = "Enum", db_type = "Enum", enum_name = "media_kind")]
+#[strum(serialize_all = "snake_case")]
 pub enum MediaKind {
     #[sea_orm(string_value = "photo")]
     Photo,
@@ -19,8 +30,19 @@ pub enum MediaKind {
     #[sea_orm(string_value = "document")]
     Document,
 }
-#[derive(Debug, Clone, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    EnumIter,
+    DeriveActiveEnum,
+    Serialize,
+    Deserialize,
+    strum :: Display,
+)]
 #[sea_orm(rs_type = "Enum", db_type = "Enum", enum_name = "media_status")]
+#[strum(serialize_all = "snake_case")]
 pub enum MediaStatus {
     #[sea_orm(string_value = "pending")]
     Pending,

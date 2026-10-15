@@ -12,10 +12,20 @@ login *args:
 scan-media:
     cargo run -p hanqing-cli -- scan-media
 
+# Enqueue all pending media into the download queue (one-time backlog bootstrap).
+enqueue-media:
+    cargo run -p hanqing-cli -- media enqueue-pending
+
+# Media status counts and download queue metrics.
+media-stats:
+    cargo run -p hanqing-cli -- media stats
+
 gen-entities:
     # Requires the verified SeaORM CLI version:
     #   cargo install sea-orm-cli --version 2.0.1 --locked --force
-    sea-orm-cli generate entity -o ./crates/hanqing-database/src/model --entity-format compact --with-serde both
+    # enum extras: strum::Display with snake_case (variant name == DB value).
+    sea-orm-cli generate entity -o ./crates/hanqing-database/src/model --entity-format compact --with-serde both \
+      --enum-extra-derives 'strum::Display' --enum-extra-attributes 'strum(serialize_all = "snake_case")'
 
 fmt:
     cargo fmt
