@@ -4,7 +4,7 @@ use sea_orm::entity::prelude::DateTimeWithTimeZone;
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
     ActiveValue::Set, ColumnTrait as _, ConnectionTrait, DatabaseConnection, EntityTrait as _,
-    QueryFilter as _, TransactionTrait as _,
+    FromQueryResult as _, QueryFilter as _, TransactionTrait as _,
 };
 use serde_json::Value;
 use snafu::ResultExt;
@@ -24,8 +24,49 @@ pub struct NewMessage {
     pub raw: Value,
 }
 
+/// One pgroonga full-text search hit.
+#[derive(Debug, sea_orm::FromQueryResult)]
+pub struct SearchHit {
+    pub chat_id: i64,
+    pub msg_id: i64,
+    pub date: DateTimeWithTimeZone,
+    pub sender_id: Option<i64>,
+    pub text: String,
+    pub score: f64,
+}
+
 #[async_trait::async_trait]
 pub trait MessagesHelper {
+    /// Full-text search via the pgroonga index (`text &@~ query`; Groonga
+    /// query syntax supports OR, `-` NOT and `"phrases"`). Newest first.
+    async fn search(
+        db: &impl ConnectionTrait,
+        query: &str,
+        chat_id: Option<i64>,
+        limit: u64,
+        offset: u64,
+    ) -> Result<Vec<SearchHit>, Error> {
+        SearchHit::find_by_statement(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DbBackend::Postgres,
+            r#"SELECT chat_id, msg_id, date, sender_id, text,
+                      pgroonga_score(tableoid, ctid) AS score
+               FROM messages
+               WHERE text &@~ $1
+                 AND ($2::bigint IS NULL OR chat_id = $2)
+               ORDER BY date DESC
+               LIMIT $3 OFFSET $4"#,
+            [
+                sea_orm::Value::String(Some(query.to_owned())),
+                sea_orm::Value::BigInt(chat_id),
+                sea_orm::Value::BigUnsigned(Some(limit)),
+                sea_orm::Value::BigUnsigned(Some(offset)),
+            ],
+        ))
+        .all(db)
+        .await
+        .context(DatabaseSnafu)
+    }
+
     /// Bulk-insert messages; re-archiving existing `(chat_id, msg_id)` rows
     /// is a no-op. Returns the number of messages attempted.
     async fn save_all(

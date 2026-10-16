@@ -36,6 +36,22 @@ enum Command {
     /// Apply all pending database migrations.
     Migrate,
 
+    /// Full-text search over archived messages (Groonga query syntax:
+    /// `foo OR bar`, `-excluded`, `"exact phrase"`).
+    Search {
+        /// Search query.
+        query: String,
+        /// Restrict to one chat.
+        #[arg(long, allow_negative_numbers = true)]
+        chat: Option<i64>,
+        /// Max hits to print.
+        #[arg(long, default_value_t = 20)]
+        limit: u64,
+        /// Skip this many hits (pagination).
+        #[arg(long, default_value_t = 0)]
+        offset: u64,
+    },
+
     /// Media download queue management (pgmq-backed; the daemon consumes it).
     Media {
         #[command(subcommand)]
@@ -127,6 +143,14 @@ async fn main() -> Result<(), Error> {
                 .await
                 .context(MigrateSnafu)?;
             info!("migrations applied");
+        }
+        Command::Search {
+            query,
+            chat,
+            limit,
+            offset,
+        } => {
+            hanqing_cli::search::run(&db, &query, chat, limit, offset).await?;
         }
         Command::Media { command } => match command {
             MediaCommand::EnqueuePending => {
