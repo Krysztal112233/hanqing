@@ -1639,6 +1639,7 @@ version = "0.1.0"
 dependencies = [
  "backon",
  "grammers-client",
+ "hanqing-archive",
  "hanqing-config",
  "hanqing-database",
  "hanqing-telegram",

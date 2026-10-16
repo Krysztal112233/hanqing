@@ -22,6 +22,7 @@ use tracing::{debug, info};
 
 pub use linkme::distributed_slice;
 
+mod backfill;
 mod error;
 mod media;
 

@@ -1,23 +1,32 @@
-//! pgmq-backed dispatch queue for media downloads.
+//! pgmq-backed task queues.
 //!
-//! The `media` table stays the registry and final state; pgmq carries the
-//! in-flight tasks. Producers enqueue in the same transaction as the media
-//! row insert, so a task never exists without its registry row. The consumer
-//! reads with a visibility timeout (crash recovery) and deletes only after
-//! the final state is persisted; `read_ct` doubles as the attempt counter.
+//! `media_download` carries media download tasks: the `media` table is the
+//! registry and final state; the queue carries in-flight work. Producers
+//! enqueue in the same transaction as the media row insert, so a task never
+//! exists without its registry row. The consumer reads with a visibility
+//! timeout (crash recovery) and deletes only after the final state is
+//! persisted; `read_ct` doubles as the attempt counter.
 //!
-//! The queue itself is created by the `create_media_queue` migration.
+//! `backfill_run` carries one-shot triggers: each message requests one
+//! `backfill_all` pass (daemon startup enqueues one; `hanqing-cli backfill`
+//! enqueues one manually). The consumer deletes the trigger before running —
+//! a pass is far longer than any sensible visibility timeout, and a crash
+//! mid-pass is covered by the next startup trigger.
+//!
+//! Both queues are created by migrations.
 
 use sea_orm::{ConnectionTrait, DbBackend, Statement, Value};
 use snafu::ResultExt;
 
 use crate::error::{DatabaseSnafu, Error};
 
-/// The one and only queue; payload is `{"file_id": <media PK>}` — the
-/// registry row carries everything else.
+/// Media download tasks; payload is `{"file_id": <media PK>}`.
 pub const MEDIA_DOWNLOAD_QUEUE: &str = "media_download";
 
-/// One task read from the queue.
+/// Backfill triggers; payload is `{"requested_by": ...}` (informational).
+pub const BACKFILL_RUN_QUEUE: &str = "backfill_run";
+
+/// One media download task read from the queue.
 #[derive(Debug)]
 pub struct QueueTask {
     /// pgmq message id; stable across visibility-timeout expiry, needed to
@@ -27,6 +36,15 @@ pub struct QueueTask {
     pub read_ct: i32,
     /// `media` primary key of the file to download.
     pub file_id: i64,
+}
+
+/// One backfill trigger read from the queue.
+#[derive(Debug)]
+pub struct TriggerTask {
+    /// pgmq message id.
+    pub msg_id: i64,
+    /// Informational `requested_by` field (e.g. "startup", "cli"), if set.
+    pub requested_by: Option<String>,
 }
 
 /// Queue-level counters from `pgmq.metrics`; `None` when the queue does not
@@ -39,8 +57,8 @@ pub struct QueueMetrics {
     pub total_messages: i64,
 }
 
-/// Enqueue download tasks. Call in the same transaction as the media row
-/// insert. Duplicate tasks (e.g. `file_id` deduped by the insert) are
+/// Enqueue media download tasks. Call in the same transaction as the media
+/// row insert. Duplicate tasks (e.g. `file_id` deduped by the insert) are
 /// harmless: the consumer re-checks row status before downloading.
 pub async fn send_batch(db: &impl ConnectionTrait, file_ids: &[i64]) -> Result<(), Error> {
     if file_ids.is_empty() {
@@ -63,8 +81,27 @@ pub async fn send_batch(db: &impl ConnectionTrait, file_ids: &[i64]) -> Result<(
     Ok(())
 }
 
-/// Read up to `qty` tasks, hiding each for `vt_secs` (visibility timeout).
-/// Tasks not deleted within the VT become visible again (crash recovery).
+/// Request one backfill pass.
+pub async fn send_backfill_trigger(
+    db: &impl ConnectionTrait,
+    requested_by: &str,
+) -> Result<(), Error> {
+    db.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "SELECT pgmq.send($1, $2)",
+        vec![
+            Value::from(BACKFILL_RUN_QUEUE),
+            Value::from(serde_json::json!({ "requested_by": requested_by })),
+        ],
+    ))
+    .await
+    .context(DatabaseSnafu)?;
+    Ok(())
+}
+
+/// Read up to `qty` media tasks, hiding each for `vt_secs` (visibility
+/// timeout). Tasks not deleted within the VT become visible again (crash
+/// recovery).
 pub async fn read(
     db: &impl ConnectionTrait,
     vt_secs: i32,
@@ -105,9 +142,35 @@ pub async fn read(
         .collect()
 }
 
-/// Delete a task after its final state is persisted. Works regardless of
-/// visibility state (`msg_id` is stable), so a task whose VT expired while
-/// being processed is still removed.
+/// Read one backfill trigger (blocking the worker is the caller's job).
+pub async fn read_backfill_trigger(
+    db: &impl ConnectionTrait,
+) -> Result<Option<TriggerTask>, Error> {
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT msg_id, message FROM pgmq.read($1, 60, 1)",
+            vec![Value::from(BACKFILL_RUN_QUEUE)],
+        ))
+        .await
+        .context(DatabaseSnafu)?;
+    rows.first()
+        .map(|row| {
+            let message: serde_json::Value = row.try_get("", "message").context(DatabaseSnafu)?;
+            Ok(TriggerTask {
+                msg_id: row.try_get("", "msg_id").context(DatabaseSnafu)?,
+                requested_by: message
+                    .get("requested_by")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned),
+            })
+        })
+        .transpose()
+}
+
+/// Delete a media task after its final state is persisted. Works regardless
+/// of visibility state (`msg_id` is stable), so a task whose VT expired
+/// while being processed is still removed.
 pub async fn delete(db: &impl ConnectionTrait, msg_id: i64) -> Result<(), Error> {
     db.execute_raw(Statement::from_sql_and_values(
         DbBackend::Postgres,
@@ -119,8 +182,20 @@ pub async fn delete(db: &impl ConnectionTrait, msg_id: i64) -> Result<(), Error>
     Ok(())
 }
 
-/// Postpone a task: it stays in the queue but invisible for `vt_secs`. Used
-/// to park a task behind a long flood wait without dropping it.
+/// Delete a consumed backfill trigger.
+pub async fn delete_backfill_trigger(db: &impl ConnectionTrait, msg_id: i64) -> Result<(), Error> {
+    db.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "SELECT pgmq.delete($1, $2)",
+        vec![Value::from(BACKFILL_RUN_QUEUE), Value::from(msg_id)],
+    ))
+    .await
+    .context(DatabaseSnafu)?;
+    Ok(())
+}
+
+/// Postpone a media task: it stays in the queue but invisible for `vt_secs`.
+/// Used to park a task behind a long flood wait without dropping it.
 pub async fn set_vt(db: &impl ConnectionTrait, msg_id: i64, vt_secs: i32) -> Result<(), Error> {
     db.execute_raw(Statement::from_sql_and_values(
         DbBackend::Postgres,

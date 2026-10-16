@@ -36,6 +36,9 @@ enum Command {
     /// Apply all pending database migrations.
     Migrate,
 
+    /// Enqueue a backfill trigger; the daemon's backfill worker picks it up.
+    Backfill,
+
     /// Full-text search over archived messages (Groonga query syntax:
     /// `foo OR bar`, `-excluded`, `"exact phrase"`).
     Search {
@@ -159,6 +162,12 @@ async fn main() -> Result<(), Error> {
                 .await
                 .context(MigrateSnafu)?;
             info!("migrations applied");
+        }
+        Command::Backfill => {
+            hanqing_database::queue::send_backfill_trigger(&db, "cli")
+                .await
+                .context(DatabaseSnafu)?;
+            info!("backfill trigger enqueued; the daemon will start a pass shortly");
         }
         Command::Search {
             query,

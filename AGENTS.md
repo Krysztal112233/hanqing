@@ -30,11 +30,11 @@ Telegram account via MTProto and archives message history into PostgreSQL.
 - `crates/hanqing-archive` — the archive core: backfill and live update
   stream (idempotent upserts, edit/delete versioning).
 - `crates/hanqing-worker` — resident background workers (media downloader,
-  ...), one module per worker. Workers self-register into a `linkme`
-  distributed slice (`#[distributed_slice(WORKERS)]`); the daemon spawns them
-  all via `spawn_all` with a `WorkerContext`. A worker decides itself whether
-  config enables it and must never take down archiving (detached tasks,
-  errors logged not propagated).
+  backfill scheduler, ...), one module per worker. Workers self-register
+  into a `linkme` distributed slice (`#[distributed_slice(WORKERS)]`); the
+  daemon spawns them all via `spawn_all` with a `WorkerContext`. A worker
+  decides itself whether config enables it and must never take down
+  archiving (detached tasks, errors logged not propagated).
 - `crates/migration` — SeaORM migrations, created exclusively via
   `sea-orm-cli migrate generate` (never hand-written files). Library-only;
   applied via `hanqing-cli migrate`. Prefer the schema builder
@@ -55,9 +55,12 @@ Telegram account via MTProto and archives message history into PostgreSQL.
   JSONB column; only high-frequency fields (chat_id, msg_id, date, sender,
   text) are promoted to indexed columns, so `grammers` upgrades don't force
   schema changes.
-- The daemon is resident: it runs `backfill_all` (history) and
-  `run_update_stream` (live updates) concurrently; both share idempotent
-  upserts. `HANQING_SKIP_BACKFILL=1` runs updates-only (testing).
+- The daemon is resident: `run_update_stream` (live updates) runs in the
+  main task; backfill is a worker driven by the pgmq `backfill_run` queue —
+  each trigger message runs one `backfill_all` pass. The daemon enqueues a
+  startup trigger (`HANQING_SKIP_BACKFILL=1` suppresses it, for testing);
+  `hanqing-cli backfill` enqueues one manually. Both archive paths share
+  idempotent upserts.
 - Edit/delete policy: `messages` always holds the latest version with soft
   markers (`edited_at`/`deleted_at`); superseded versions are archived into
   `message_versions` (insert-from-current-row, then update, one txn).

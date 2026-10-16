@@ -82,9 +82,9 @@ async fn main() -> Result<(), Error> {
         .await
     });
 
-    // Workers (media downloader, ...) self-register via linkme and decide
-    // themselves whether config enables them; they run as detached tasks —
-    // a worker failure must not take down archiving.
+    // Workers (media downloader, backfill, ...) self-register via linkme and
+    // decide themselves whether config enables them; they run as detached
+    // tasks — a worker failure must not take down archiving.
     let workers = hanqing_worker::spawn_all(&hanqing_worker::WorkerContext {
         client: client.clone(),
         session: connection.session.clone(),
@@ -94,18 +94,15 @@ async fn main() -> Result<(), Error> {
     });
     info!(?workers, "workers spawned");
 
+    // Backfill runs on demand: one trigger message per startup, consumed by
+    // the backfill worker. `hanqing-cli backfill` enqueues the same trigger.
     if std::env::var_os("HANQING_SKIP_BACKFILL").is_none() {
-        let stats = hanqing_archive::backfill_all(&client, &db, self_id, enqueue_media, &peers)
+        hanqing_database::queue::send_backfill_trigger(&db, "startup")
             .await
-            .context(ArchiveSnafu)?;
-        info!(
-            chats = stats.registered_chats,
-            completed = stats.completed_chats,
-            messages = stats.messages,
-            "backfill run complete"
-        );
+            .context(DatabaseSnafu)?;
+        info!("startup backfill trigger enqueued");
     } else {
-        info!("HANQING_SKIP_BACKFILL set; skipping backfill");
+        info!("HANQING_SKIP_BACKFILL set; no startup backfill trigger");
     }
 
     info!("daemon resident; following live updates");
