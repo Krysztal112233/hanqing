@@ -39,9 +39,11 @@ use snafu::ResultExt;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
+use backon::Retryable as _;
+
 use crate::error::{CredentialsSnafu, DatabaseSnafu, Error, InvokeSnafu, S3Snafu, SessionSnafu};
 use crate::{WORKERS, Worker, WorkerContext, distributed_slice};
-use hanqing_telegram::retry::is_transient;
+use hanqing_telegram::retry::{backoff, is_transient};
 
 /// Self-registration: the daemon's `hanqing_worker::spawn_all` picks this up
 /// via the linkme distributed slice; no `main.rs` change needed.
@@ -69,10 +71,8 @@ fn spawn_media_downloader(ctx: &WorkerContext) -> Option<JoinHandle<()>> {
 }
 
 /// Tasks stay hidden this long per attempt; a crash redelivers afterwards.
+/// One task per read, so the VT only ever has to cover a single item.
 const VISIBILITY_TIMEOUT_SECS: i32 = 300;
-
-/// Tasks consumed per `pgmq.read` (processed sequentially).
-const BATCH_SIZE: i32 = 8;
 
 /// Total deliveries before a task is marked `failed`. Generous on purpose:
 /// attempts are only burned by transient errors, flood waits and crashes —
@@ -82,10 +82,6 @@ const MAX_ATTEMPTS: i32 = 50;
 /// Flood waits longer than this postpone the task (`set_vt`) instead of
 /// sleeping inline.
 const MAX_FLOOD_WAIT_SECS: u32 = 600;
-
-/// Whole-file retries after a transient error (a failed `DownloadIter`
-/// cannot resume, so each retry restarts from offset 0).
-const MAX_DOWNLOAD_RETRIES: usize = 5;
 
 /// Idle poll cadence when the queue is empty; when downloads are disabled
 /// (`media.download_enabled = false`) the worker sleeps on this cadence too,
@@ -166,17 +162,15 @@ impl MediaDownloader {
             return Ok(());
         }
 
-        let tasks = queue::read(&self.db, VISIBILITY_TIMEOUT_SECS, BATCH_SIZE)
+        let tasks = queue::read(&self.db, VISIBILITY_TIMEOUT_SECS, 1)
             .await
             .context(DatabaseSnafu)?;
-        if tasks.is_empty() {
+        let Some(task) = tasks.into_iter().next() else {
             tokio::time::sleep(IDLE_SLEEP).await;
             return Ok(());
-        }
+        };
 
-        for task in &tasks {
-            self.process(task, settings.media.max_size_bytes).await;
-        }
+        self.process(&task, settings.media.max_size_bytes).await;
         Ok(())
     }
 
@@ -308,21 +302,25 @@ impl MediaDownloader {
         self.download(&media).await
     }
 
-    /// Download fully into memory (bounded by `max_size_bytes`). Flood waits
-    /// are slept through; transient errors retry the whole file (grammers
-    /// spends a failed `DownloadIter`, so partial resume is impossible).
+    /// Download fully into memory (bounded by `max_size_bytes`). Transient
+    /// errors retry via the shared backon policy (a fresh iterator per
+    /// attempt: grammers spends a failed `DownloadIter`, so retries restart
+    /// from offset 0). Flood waits are slept through outside the retry
+    /// budget, and long ones postpone the task instead.
     async fn download(&self, media: &TgMedia) -> Result<Download, Error> {
-        let mut retries = 0;
         loop {
-            let mut iter = self.client.iter_download(media);
-            let mut bytes = Vec::with_capacity(media.size().unwrap_or(0));
-            let result = loop {
-                match iter.next().await {
-                    Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
-                    Ok(None) => break Ok(bytes),
-                    Err(err) => break Err(err),
+            let result = (|| async {
+                let mut iter = self.client.iter_download(media);
+                let mut bytes = Vec::with_capacity(media.size().unwrap_or(0));
+                while let Some(chunk) = iter.next().await? {
+                    bytes.extend_from_slice(&chunk);
                 }
-            };
+                Ok(bytes)
+            })
+            .retry(backoff())
+            .when(is_transient)
+            .notify(|err, delay| warn!(%err, ?delay, "transient download error; restarting file"))
+            .await;
 
             match result {
                 Ok(bytes) => return Ok(Download::Done(bytes)),
@@ -333,12 +331,6 @@ impl MediaDownloader {
                     }
                     warn!(wait, "download flood wait; sleeping");
                     tokio::time::sleep(Duration::from_secs(u64::from(wait) + 1)).await;
-                }
-                Err(err) if is_transient(&err) && retries < MAX_DOWNLOAD_RETRIES => {
-                    retries += 1;
-                    let delay = Duration::from_secs(2 << retries.min(5));
-                    warn!(%err, ?delay, retries, "transient download error; restarting file");
-                    tokio::time::sleep(delay).await;
                 }
                 Err(err) => return Err(err).context(InvokeSnafu),
             }

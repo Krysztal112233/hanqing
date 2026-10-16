@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+backon.workspace = true
 linkme = "0.3"
 rust-s3 = { version = "0.38", default-features = false, features = [
 	"tokio-rustls-tls-ring",
