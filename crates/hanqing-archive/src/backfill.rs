@@ -32,6 +32,7 @@ use crate::error::{
     DatabaseSnafu, DbSnafu, Error, InvokeSnafu, PeerNotCachedSnafu, PeerResolveSnafu,
     SerializeSnafu,
 };
+use crate::peers::PeerRecorder;
 use backon::RetryableWithContext;
 
 use hanqing_telegram::retry::{backoff, is_transient};
@@ -61,8 +62,16 @@ pub async fn backfill_all(
     db: &DatabaseConnection,
     self_id: i64,
     enqueue_media: bool,
+    recorder: &PeerRecorder,
 ) -> Result<BackfillStats, Error> {
-    let peers = register_dialogs(client, db, self_id).await?;
+    let peers = register_dialogs(client, db, self_id, recorder).await?;
+    let ctx = BackfillCtx {
+        client,
+        db,
+        self_id,
+        enqueue_media,
+        recorder,
+    };
     let pending = SyncState::find_pending(db).await.context(DatabaseSnafu)?;
 
     let mut stats = BackfillStats {
@@ -79,16 +88,7 @@ pub async fn backfill_all(
             continue;
         };
 
-        let fetched = backfill_chat(
-            client,
-            db,
-            state.chat_id,
-            peer_ref,
-            state.cursor,
-            self_id,
-            enqueue_media,
-        )
-        .await?;
+        let fetched = backfill_chat(&ctx, state.chat_id, peer_ref, state.cursor).await?;
         stats.completed_chats += 1;
         stats.messages += fetched;
     }
@@ -102,11 +102,13 @@ async fn register_dialogs(
     client: &Client,
     db: &DatabaseConnection,
     self_id: i64,
+    recorder: &PeerRecorder,
 ) -> Result<HashMap<i64, PeerRef>, Error> {
     let mut peers = HashMap::new();
     let mut dialogs = client.iter_dialogs();
     while let Some(dialog) = dialogs.next().await.context(InvokeSnafu)? {
         let peer = dialog.peer();
+        recorder.record(db, peer).await;
         let chat_id = peer.id().bot_api_dialog_id().unwrap_or(self_id);
         let peer_ref = peer
             .to_ref()
@@ -124,15 +126,21 @@ async fn register_dialogs(
     Ok(peers)
 }
 
+/// Shared context threaded through one backfill run.
+struct BackfillCtx<'a> {
+    client: &'a Client,
+    db: &'a DatabaseConnection,
+    self_id: i64,
+    enqueue_media: bool,
+    recorder: &'a PeerRecorder,
+}
+
 /// Backfill one chat to completion (or pausably far). Returns messages fetched.
 async fn backfill_chat(
-    client: &Client,
-    db: &DatabaseConnection,
+    ctx: &BackfillCtx<'_>,
     chat_id: i64,
     peer_ref: &PeerRef,
     cursor: Option<i64>,
-    self_id: i64,
-    enqueue_media: bool,
 ) -> Result<u64, Error> {
     info!(chat_id, ?cursor, "backfilling chat");
 
@@ -140,7 +148,7 @@ async fn backfill_chat(
     // `oldest == i64::MAX` marks a fresh chat; guard every offset_id call,
     // because `i64::MAX as i32` truncates to -1.
     let rebuild_iter = |oldest: i64| {
-        let mut iter = client.iter_messages(*peer_ref);
+        let mut iter = ctx.client.iter_messages(*peer_ref);
         if oldest != i64::MAX {
             iter = iter.offset_id(oldest as i32);
         }
@@ -169,16 +177,19 @@ async fn backfill_chat(
         match next {
             Ok(Some(message)) => {
                 oldest = oldest.min(message.id() as i64);
-                batch.push(map_message(chat_id, &message, self_id)?);
+                if let Some(sender) = message.sender() {
+                    ctx.recorder.record(ctx.db, sender).await;
+                }
+                batch.push(map_message(chat_id, &message, ctx.self_id)?);
                 total += 1;
                 if batch.len() >= BATCH_SIZE {
-                    flush_batch(db, chat_id, &mut batch, oldest, enqueue_media).await?;
+                    flush_batch(ctx.db, chat_id, &mut batch, oldest, ctx.enqueue_media).await?;
                 }
             }
             Ok(None) => break,
             Err(InvocationError::Rpc(err)) if err.name == "FLOOD_WAIT" => {
                 let wait = err.value.unwrap_or(30);
-                flush_batch(db, chat_id, &mut batch, oldest, enqueue_media).await?;
+                flush_batch(ctx.db, chat_id, &mut batch, oldest, ctx.enqueue_media).await?;
                 if wait > MAX_FLOOD_WAIT_SECS {
                     warn!(
                         chat_id,
@@ -193,14 +204,14 @@ async fn backfill_chat(
                 iter = rebuild_iter(oldest);
             }
             Err(err) => {
-                flush_batch(db, chat_id, &mut batch, oldest, enqueue_media).await?;
+                flush_batch(ctx.db, chat_id, &mut batch, oldest, ctx.enqueue_media).await?;
                 return Err(err).context(InvokeSnafu);
             }
         }
     }
 
-    flush_batch(db, chat_id, &mut batch, oldest, enqueue_media).await?;
-    SyncState::mark_done(db, chat_id)
+    flush_batch(ctx.db, chat_id, &mut batch, oldest, ctx.enqueue_media).await?;
+    SyncState::mark_done(ctx.db, chat_id)
         .await
         .context(DatabaseSnafu)?;
     info!(chat_id, total, "chat backfill complete");

@@ -33,6 +33,9 @@ pub struct SearchHit {
     pub sender_id: Option<i64>,
     pub text: String,
     pub score: f64,
+    /// Cached display names (NULL when the peer was never recorded).
+    pub chat_name: Option<String>,
+    pub sender_name: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -48,12 +51,15 @@ pub trait MessagesHelper {
     ) -> Result<Vec<SearchHit>, Error> {
         SearchHit::find_by_statement(sea_orm::Statement::from_sql_and_values(
             sea_orm::DbBackend::Postgres,
-            r#"SELECT chat_id, msg_id, date, sender_id, text,
-                      pgroonga_score(tableoid, ctid) AS score
-               FROM messages
-               WHERE text &@~ $1
-                 AND ($2::bigint IS NULL OR chat_id = $2)
-               ORDER BY date DESC
+            r#"SELECT m.chat_id, m.msg_id, m.date, m.sender_id, m.text,
+                      pgroonga_score(m.tableoid, m.ctid) AS score,
+                      pc.name AS chat_name, ps.name AS sender_name
+               FROM messages m
+               LEFT JOIN peers pc ON pc.id = m.chat_id
+               LEFT JOIN peers ps ON ps.id = m.sender_id
+               WHERE m.text &@~ $1
+                 AND ($2::bigint IS NULL OR m.chat_id = $2)
+               ORDER BY m.date DESC
                LIMIT $3 OFFSET $4"#,
             [
                 sea_orm::Value::String(Some(query.to_owned())),

@@ -23,12 +23,17 @@ pub async fn run(
     }
     for hit in hits {
         let snippet: String = hit.text.replace('\n', " ").chars().take(100).collect();
+        let chat = hit.chat_name.unwrap_or_else(|| hit.chat_id.to_string());
+        let sender = hit
+            .sender_name
+            .or_else(|| hit.sender_id.map(|id| id.to_string()))
+            .unwrap_or_default();
         println!(
-            "{} {:>15} {:>9} {:>12}  {}",
+            "{}  [{} #{}] {}: {}",
             hit.date.format("%Y-%m-%d %H:%M"),
-            hit.chat_id,
+            chat,
             hit.msg_id,
-            hit.sender_id.map(|s| s.to_string()).unwrap_or_default(),
+            sender,
             snippet
         );
     }

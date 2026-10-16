@@ -18,6 +18,8 @@ use grammers_client::update::Update;
 use hanqing_database::helper::prelude::*;
 use hanqing_database::model::prelude::{Media, Messages};
 use sea_orm::{DatabaseConnection, TransactionTrait as _};
+
+use crate::peers::PeerRecorder;
 use snafu::ResultExt;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -44,6 +46,7 @@ pub async fn run_update_stream(
     updates: mpsc::Receiver<UpdatesLike>,
     self_id: i64,
     enqueue_media: bool,
+    recorder: &PeerRecorder,
 ) -> Result<(), Error> {
     // catch_up: replay updates received while we were offline.
     let configuration = UpdatesConfiguration {
@@ -85,7 +88,7 @@ pub async fn run_update_stream(
             Err(err) => return Err(err).context(InvokeSnafu),
         };
 
-        if let Err(err) = handle_update(db, update, self_id, enqueue_media).await {
+        if let Err(err) = handle_update(db, update, self_id, enqueue_media, recorder).await {
             warn!(%err, "failed to archive update; skipping");
         }
         if last_sync.elapsed() >= STATE_SYNC_INTERVAL {
@@ -102,6 +105,7 @@ async fn handle_update(
     update: Update,
     self_id: i64,
     enqueue_media: bool,
+    recorder: &PeerRecorder,
 ) -> Result<(), Error> {
     let edited = matches!(&update, Update::MessageEdited(_));
     match update {
@@ -109,6 +113,13 @@ async fn handle_update(
             let Some(chat_id) = chat_id_of(&message, self_id) else {
                 return Ok(());
             };
+            // Refresh the name cache for everyone involved (chat + sender).
+            if let Some(peer) = message.peer() {
+                recorder.record(db, peer).await;
+            }
+            if let Some(sender) = message.sender() {
+                recorder.record(db, sender).await;
+            }
             let (msg, media) = map_message(chat_id, &message, self_id)?;
             let mut outcome = None;
             if edited {

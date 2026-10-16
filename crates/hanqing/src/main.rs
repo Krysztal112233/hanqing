@@ -66,8 +66,10 @@ async fn main() -> Result<(), Error> {
     // missed; both paths share the same idempotent upserts. Media download
     // tasks are enqueued at archive time when S3 storage is configured.
     let enqueue_media = config.s3.is_some();
+    let peers = std::sync::Arc::new(hanqing_archive::PeerRecorder::new(self_id));
     let stream_db = db.clone();
     let stream_client = client.clone();
+    let stream_peers = peers.clone();
     let mut stream_task = tokio::spawn(async move {
         hanqing_archive::run_update_stream(
             &stream_client,
@@ -75,6 +77,7 @@ async fn main() -> Result<(), Error> {
             connection.updates,
             self_id,
             enqueue_media,
+            &stream_peers,
         )
         .await
     });
@@ -92,7 +95,7 @@ async fn main() -> Result<(), Error> {
     info!(?workers, "workers spawned");
 
     if std::env::var_os("HANQING_SKIP_BACKFILL").is_none() {
-        let stats = hanqing_archive::backfill_all(&client, &db, self_id, enqueue_media)
+        let stats = hanqing_archive::backfill_all(&client, &db, self_id, enqueue_media, &peers)
             .await
             .context(ArchiveSnafu)?;
         info!(

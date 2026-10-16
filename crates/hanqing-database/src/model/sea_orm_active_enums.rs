@@ -55,3 +55,26 @@ pub enum MediaStatus {
     #[sea_orm(string_value = "skipped")]
     Skipped,
 }
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    EnumIter,
+    DeriveActiveEnum,
+    Serialize,
+    Deserialize,
+    strum :: Display,
+)]
+#[sea_orm(rs_type = "Enum", db_type = "Enum", enum_name = "peer_kind")]
+#[strum(serialize_all = "snake_case")]
+pub enum PeerKind {
+    #[sea_orm(string_value = "user")]
+    User,
+    #[sea_orm(string_value = "group")]
+    Group,
+    #[sea_orm(string_value = "channel")]
+    Channel,
+    #[sea_orm(string_value = "community")]
+    Community,
+}

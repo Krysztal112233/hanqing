@@ -37,7 +37,10 @@ Telegram account via MTProto and archives message history into PostgreSQL.
   errors logged not propagated).
 - `crates/migration` — SeaORM migrations, created exclusively via
   `sea-orm-cli migrate generate` (never hand-written files). Library-only;
-  applied via `hanqing-cli migrate`.
+  applied via `hanqing-cli migrate`. Prefer the schema builder
+  (`Table::create()`, `Type::create().as_enum()`, ...) when the DDL is
+  expressible; raw `up.sql`/`down.sql` files only for extension-specific
+  DDL the builder cannot express (pgmq, pgroonga).
 
 ## Conventions
 

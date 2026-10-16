@@ -69,6 +69,12 @@ enum Command {
         #[command(subcommand)]
         command: ChatsCommand,
     },
+
+    /// Manage the peer display-name cache.
+    Peers {
+        #[command(subcommand)]
+        command: PeersCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -89,6 +95,13 @@ enum SettingsCommand {
     Set { key: String, value: String },
     /// Reset one key (or all) to defaults.
     Reset { key: Option<String> },
+}
+
+#[derive(Subcommand)]
+enum PeersCommand {
+    /// Refresh the display-name cache: all dialogs, then resolve message
+    /// senders never seen as a dialog (one RPC each; can take a while).
+    Sync,
 }
 
 #[derive(Subcommand)]
@@ -151,6 +164,25 @@ async fn main() -> Result<(), Error> {
             offset,
         } => {
             hanqing_cli::search::run(&db, &query, chat, limit, offset).await?;
+        }
+        Command::Peers {
+            command: PeersCommand::Sync,
+        } => {
+            let connection = hanqing_telegram::connect(&config.telegram, db.clone())
+                .await
+                .context(TelegramSnafu)?;
+            let Some(me) = hanqing_telegram::authorized_user(&connection.client)
+                .await
+                .context(TelegramSnafu)?
+            else {
+                tracing::error!("no authorized session; run `hanqing-cli login` first");
+                std::process::exit(2);
+            };
+            let self_id = me
+                .id()
+                .bot_api_dialog_id()
+                .expect("self user has a real id");
+            hanqing_cli::peers::sync(&db, &connection, self_id).await?;
         }
         Command::Media { command } => match command {
             MediaCommand::EnqueuePending => {

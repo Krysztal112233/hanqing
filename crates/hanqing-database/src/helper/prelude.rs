@@ -3,6 +3,7 @@
 
 pub use super::media::MediaHelper;
 pub use super::message::MessagesHelper;
+pub use super::peers::PeersHelper;
 pub use super::session::{
     SessionChannelStateHelper, SessionDcHomeHelper, SessionDcOptionHelper, SessionPeerHelper,
     SessionUpdateStateHelper,
