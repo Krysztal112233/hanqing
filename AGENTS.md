@@ -1,6 +1,6 @@
 # AGENTS.md
 
-hanqing is a Telegram → PostgreSQL archive daemon: it signs into a personal
+hanqing is a Telegram -> PostgreSQL archive daemon: it signs into a personal
 Telegram account via MTProto and archives message history into PostgreSQL.
 
 ## Design scope and priorities
@@ -17,9 +17,9 @@ Telegram account via MTProto and archives message history into PostgreSQL.
 - `crates/hanqing` — binary (daemon entry); global allocator is `mimalloc`.
   Account-agnostic: never prompts, exits with an error when no authorized
   session exists.
-- `crates/hanqing-cli` — management CLI (`clap`): `login` (interactive
-  sign-in, `inquire` prompts), `scan-media`. Sessions live in PG, so login
-  can run on any host that reaches the database.
+- `crates/hanqing-cli` — management CLI (`clap`); see `hanqing-cli -h`.
+  Sessions live in PG, so CLI commands can run on any host that reaches the
+  database.
 - `crates/hanqing-config` — `hanqing.toml` + `HANQING__` env prefix (`__`
   separator); strict parsing (`deny_unknown_fields`), unknown keys are startup
   hard errors.
@@ -29,12 +29,12 @@ Telegram account via MTProto and archives message history into PostgreSQL.
   message/dialog iteration, session storage, shared retry policy (`retry.rs`).
 - `crates/hanqing-archive` — the archive core: backfill and live update
   stream (idempotent upserts, edit/delete versioning).
-- `crates/hanqing-worker` — resident background workers (media downloader,
-  backfill scheduler, ...), one module per worker. Workers self-register
-  into a `linkme` distributed slice (`#[distributed_slice(WORKERS)]`); the
-  daemon spawns them all via `spawn_all` with a `WorkerContext`. A worker
-  decides itself whether config enables it and must never take down
-  archiving (detached tasks, errors logged not propagated).
+- `crates/hanqing-worker` — resident background workers, one module per
+  worker. Workers self-register into a `linkme` distributed slice
+  (`#[distributed_slice(WORKERS)]`); the daemon spawns them all via
+  `spawn_all` with a `WorkerContext`. A worker decides itself whether config
+  enables it and must never take down archiving (detached tasks, errors
+  logged not propagated).
 - `crates/migration` — SeaORM migrations, created exclusively via
   `sea-orm-cli migrate generate` (never hand-written files). Library-only;
   applied via `hanqing-cli migrate`. Prefer the schema builder
@@ -58,9 +58,8 @@ Telegram account via MTProto and archives message history into PostgreSQL.
 - The daemon is resident: `run_update_stream` (live updates) runs in the
   main task; backfill is a worker driven by the pgmq `backfill_run` queue —
   each trigger message runs one `backfill_all` pass. The daemon enqueues a
-  startup trigger (`HANQING_SKIP_BACKFILL=1` suppresses it, for testing);
-  `hanqing-cli backfill` enqueues one manually. Both archive paths share
-  idempotent upserts.
+  startup trigger (`HANQING_SKIP_BACKFILL=1` suppresses it, for testing).
+  Both archive paths share idempotent upserts.
 - Edit/delete policy: `messages` always holds the latest version with soft
   markers (`edited_at`/`deleted_at`); superseded versions are archived into
   `message_versions` (insert-from-current-row, then update, one txn).
@@ -78,18 +77,17 @@ Telegram account via MTProto and archives message history into PostgreSQL.
 - Media pipeline: the `media` table is the registry and final state; the pgmq
   `media_download` queue carries in-flight tasks (visibility timeout = crash
   recovery, `read_ct` = attempt counter). Archiving enqueues row + task in
-  one transaction when S3 is configured; the daemon's media downloader
-  worker consumes it while `media.download_enabled` is set, stores objects
-  at `media/<kind>/<file_id>`, and re-fetches each message before
-  downloading (`file_reference` expires). Backlog bootstrap: `just enqueue-media`.
+  one transaction when S3 is configured; the downloader worker consumes it
+  and stores objects at `media/<kind>/<file_id>`, re-fetching each message
+  before downloading (`file_reference` expires).
 - Enum-like DB columns use real PostgreSQL enum types; `sea-orm-cli`
   generates `DeriveActiveEnum` types (`model/sea_orm_active_enums.rs`) and
   helpers use those generated enums directly.
-- Config split: files/env hold connectivity only (`telegram.api_id/api_hash`,
-  `database.*`); behavior settings live in the DB — per-account document in
-  `account_settings` (schema = `hanqing_config::AccountSettings`, strict
-  serde), per-chat archive switch as `sync_state.enabled` (managed via
-  `hanqing-cli settings|chats`).
+- Config split: files/env hold connectivity and spawn-time worker knobs
+  (`telegram.*`, `database.*`, `s3.*`, `worker.*`); behavior settings live
+  in the DB — per-account document in `account_settings` (schema =
+  `hanqing_config::AccountSettings`, strict serde), per-chat archive switch
+  as `sync_state.enabled`.
 - `grammers-*` crates are pinned by git `rev` from
   <https://codeberg.org/Lonami/grammers> (crates.io releases lag TL layers).
 - SeaORM is pinned exactly (`=2.0.4`); `sea-orm-cli` must match (`just
@@ -104,6 +102,7 @@ just watch        # auto-recompile on .rs changes (uses watchexec)
 just gen-entities # regenerate entity models from DB via sea-orm-cli
 just fmt          # cargo fmt
 cargo test        # run all tests (same as `just check`)
+hanqing-cli -h    # management CLI (login / migrate / search / media / ...)
 ```
 
 ## Commit conventions
