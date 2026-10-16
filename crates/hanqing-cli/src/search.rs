@@ -13,6 +13,7 @@ pub async fn run(
     chat: Option<i64>,
     limit: u64,
     offset: u64,
+    chars: usize,
 ) -> Result<(), Error> {
     let hits = Messages::search(db, query, chat, limit, offset)
         .await
@@ -22,7 +23,12 @@ pub async fn run(
         return Ok(());
     }
     for hit in hits {
-        let snippet: String = hit.text.replace('\n', " ").chars().take(100).collect();
+        let flat = hit.text.replace('\n', " ");
+        let snippet: String = if chars == 0 {
+            flat
+        } else {
+            flat.chars().take(chars).collect()
+        };
         let chat = hit.chat_name.unwrap_or_else(|| hit.chat_id.to_string());
         let sender = hit
             .sender_name

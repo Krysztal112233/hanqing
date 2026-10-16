@@ -50,6 +50,9 @@ enum Command {
         /// Skip this many hits (pagination).
         #[arg(long, default_value_t = 0)]
         offset: u64,
+        /// Truncate each message to this many characters (0 = full text).
+        #[arg(long, default_value_t = 0)]
+        chars: usize,
     },
 
     /// Media download queue management (pgmq-backed; the daemon consumes it).
@@ -162,8 +165,9 @@ async fn main() -> Result<(), Error> {
             chat,
             limit,
             offset,
+            chars,
         } => {
-            hanqing_cli::search::run(&db, &query, chat, limit, offset).await?;
+            hanqing_cli::search::run(&db, &query, chat, limit, offset, chars).await?;
         }
         Command::Peers {
             command: PeersCommand::Sync,
