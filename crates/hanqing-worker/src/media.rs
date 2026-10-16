@@ -55,19 +55,31 @@ static MEDIA_DOWNLOADER: Worker = Worker {
 
 fn spawn_media_downloader(ctx: &WorkerContext) -> Option<JoinHandle<()>> {
     let s3 = ctx.config.s3.clone()?;
-    match MediaDownloader::new(
-        ctx.client.clone(),
-        ctx.session.clone(),
-        ctx.db.clone(),
-        &s3,
-        ctx.self_id,
-    ) {
-        Ok(downloader) => Some(tokio::spawn(async move { downloader.run().await })),
-        Err(err) => {
-            error!(%err, "media downloader disabled");
-            None
+    let replicas = ctx.config.worker.media.download_workers;
+    if replicas == 0 {
+        info!("worker.media.download_workers = 0; downloader disabled");
+        return None;
+    }
+    let mut handle = None;
+    for replica in 0..replicas {
+        match MediaDownloader::new(
+            ctx.client.clone(),
+            ctx.session.clone(),
+            ctx.db.clone(),
+            &s3,
+            ctx.self_id,
+        ) {
+            Ok(downloader) => {
+                let h = tokio::spawn(async move { downloader.run().await });
+                handle.get_or_insert(h);
+            }
+            Err(err) => {
+                error!(%err, replica, "media downloader replica disabled");
+                return None;
+            }
         }
     }
+    handle
 }
 
 /// Tasks stay hidden this long per attempt; a crash redelivers afterwards.

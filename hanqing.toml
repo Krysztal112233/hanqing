@@ -3,3 +3,6 @@
 
 [database]
 max_connections = 8
+
+# [worker.media]
+# download_workers = 3   # concurrent downloader replicas; 0 disables

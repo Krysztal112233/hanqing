@@ -13,6 +13,41 @@ pub struct HanqingConfig {
     /// Media object storage; absent until the downloader is configured.
     #[serde(default)]
     pub s3: Option<S3Config>,
+    /// Process-level worker knobs, one sub-table per worker
+    /// (`[worker.media]`, ...). Note the split from `AccountSettings` (the
+    /// per-account DB document): concurrency and other spawn-time
+    /// parameters live here; behavior toggles live in the DB so they apply
+    /// without a restart.
+    #[serde(default)]
+    pub worker: WorkerConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct WorkerConfig {
+    pub media: MediaWorkerConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaWorkerConfig {
+    /// Concurrent media downloader replicas (`pgmq.read` uses FOR UPDATE
+    /// SKIP LOCKED, so replicas never see each other's tasks). `0` disables
+    /// the downloader entirely.
+    #[serde(default = "default_download_workers")]
+    pub download_workers: usize,
+}
+
+impl Default for MediaWorkerConfig {
+    fn default() -> Self {
+        Self {
+            download_workers: default_download_workers(),
+        }
+    }
+}
+
+fn default_download_workers() -> usize {
+    3
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
