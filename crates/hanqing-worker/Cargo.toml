@@ -5,11 +5,8 @@ edition.workspace = true
 
 [dependencies]
 backon.workspace = true
-linkme = "0.3"
-rust-s3 = { version = "0.38", default-features = false, features = [
-	"tokio-rustls-tls-ring",
-	"fail-on-err",
-] }
+linkme.workspace = true
+rust-s3.workspace = true
 sea-orm.workspace = true
 snafu.workspace = true
 tokio.workspace = true
