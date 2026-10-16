@@ -4,25 +4,9 @@ default:
 watch:
     watchexec -e rs -r cargo run -p hanqing
 
-# Sign in interactively (one-time per account; session persists in PostgreSQL).
-login *args:
-    cargo run -p hanqing-cli -- login {{args}}
-
 # Apply all pending database migrations.
 migrate:
     cargo run -p hanqing-cli -- migrate
-
-# Extract media metadata from already-archived messages (idempotent).
-scan-media:
-    cargo run -p hanqing-cli -- scan-media
-
-# Enqueue all pending media into the download queue (one-time backlog bootstrap).
-enqueue-media:
-    cargo run -p hanqing-cli -- media enqueue-pending
-
-# Media status counts and download queue metrics.
-media-stats:
-    cargo run -p hanqing-cli -- media stats
 
 gen-entities:
     # Requires the verified SeaORM CLI version:
