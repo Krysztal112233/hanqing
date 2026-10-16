@@ -3,7 +3,9 @@ use dotenvy::dotenv;
 use snafu::ResultExt;
 use tracing::{info, warn};
 
-use hanqing_cli::error::{ArchiveSnafu, ConfigSnafu, DatabaseSnafu, Error, TelegramSnafu};
+use hanqing_cli::error::{
+    ArchiveSnafu, ConfigSnafu, DatabaseSnafu, Error, MigrateSnafu, TelegramSnafu,
+};
 use hanqing_config::HanqingConfig;
 
 #[derive(Parser)]
@@ -30,6 +32,9 @@ enum Command {
     /// Extract media metadata from already-archived messages (idempotent,
     /// no Telegram connection).
     ScanMedia,
+
+    /// Apply all pending database migrations.
+    Migrate,
 
     /// Media download queue management (pgmq-backed; the daemon consumes it).
     Media {
@@ -115,6 +120,13 @@ async fn main() -> Result<(), Error> {
                 .await
                 .context(ArchiveSnafu)?;
             info!(count, "media scan done");
+        }
+        Command::Migrate => {
+            use sea_orm_migration::MigratorTrait as _;
+            migration::Migrator::up(&db, None)
+                .await
+                .context(MigrateSnafu)?;
+            info!("migrations applied");
         }
         Command::Media { command } => match command {
             MediaCommand::EnqueuePending => {

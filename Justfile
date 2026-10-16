@@ -8,6 +8,10 @@ watch:
 login *args:
     cargo run -p hanqing-cli -- login {{args}}
 
+# Apply all pending database migrations.
+migrate:
+    cargo run -p hanqing-cli -- migrate
+
 # Extract media metadata from already-archived messages (idempotent).
 scan-media:
     cargo run -p hanqing-cli -- scan-media

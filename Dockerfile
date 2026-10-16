@@ -1,5 +1,5 @@
 # hanqing images, one per compose service, selected by build target:
-#   target app — daemon + hanqing-cli + migration (all-in-one binary image)
+#   target app — daemon + hanqing-cli (management CLI incl. `migrate`)
 #   target db  — pgroonga (search) + pgmq (media download queue)
 #
 # rustls-only dependency tree; no system libraries needed beyond glibc.
@@ -8,7 +8,7 @@ FROM rust:1-bookworm AS build
 WORKDIR /src
 COPY . .
 RUN cargo build --locked --release \
-      -p hanqing -p hanqing-cli -p migration
+      -p hanqing -p hanqing-cli
 
 FROM debian:bookworm-slim AS app
 RUN apt-get update \
@@ -19,7 +19,6 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build /src/target/release/hanqing /usr/local/bin/hanqing
 COPY --from=build /src/target/release/hanqing-cli /usr/local/bin/hanqing-cli
-COPY --from=build /src/target/release/migration /usr/local/bin/migration
 # Config skeleton (max_connections only; credentials come from env).
 COPY hanqing.toml /app/hanqing.toml
 

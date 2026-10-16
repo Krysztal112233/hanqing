@@ -31,6 +31,13 @@ pub enum Error {
         location: Location,
     },
 
+    #[snafu(display("migration error: {source}"))]
+    Migrate {
+        source: sea_orm_migration::DbErr,
+        #[snafu(implicit)]
+        location: Location,
+    },
+
     #[snafu(display("telegram rpc error: {source}"))]
     Invoke {
         source: grammers_client::InvocationError,

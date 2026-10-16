@@ -36,7 +36,8 @@ Telegram account via MTProto and archives message history into PostgreSQL.
   config enables it and must never take down archiving (detached tasks,
   errors logged not propagated).
 - `crates/migration` — SeaORM migrations, created exclusively via
-  `sea-orm-cli migrate generate` (never hand-written files).
+  `sea-orm-cli migrate generate` (never hand-written files). Library-only;
+  applied via `hanqing-cli migrate`.
 
 ## Conventions
 

@@ -20,3 +20,5 @@ hanqing-archive.workspace = true
 hanqing-config.workspace = true
 hanqing-database.workspace = true
 hanqing-telegram.workspace = true
+migration.workspace = true
+sea-orm-migration.workspace = true

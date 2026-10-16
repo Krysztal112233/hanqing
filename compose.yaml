@@ -36,7 +36,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: app
-    entrypoint: ["migration", "up"]
+    entrypoint: ["hanqing-cli", "migrate"]
     env_file: .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-hanqing}:${POSTGRES_PASSWORD:-hanqing}@db:5432/${POSTGRES_DB:-hanqing}

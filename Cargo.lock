@@ -1578,7 +1578,9 @@ dependencies = [
  "hanqing-database",
  "hanqing-telegram",
  "inquire",
+ "migration",
  "sea-orm",
+ "sea-orm-migration",
  "serde_json",
  "snafu",
  "tokio",
@@ -1635,6 +1637,7 @@ dependencies = [
 name = "hanqing-worker"
 version = "0.1.0"
 dependencies = [
+ "backon",
  "grammers-client",
  "hanqing-config",
  "hanqing-database",
@@ -2365,9 +2368,7 @@ dependencies = [
 name = "migration"
 version = "0.1.0"
 dependencies = [
- "config",
  "sea-orm-migration",
- "tokio",
 ]
 
 [[package]]
