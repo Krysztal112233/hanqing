@@ -41,7 +41,10 @@ pub async fn stats(db: &DatabaseConnection) -> Result<(), Error> {
         println!("  {status:<12} {count:>10} rows {bytes:>14} bytes");
     }
 
-    match queue::metrics(db).await.context(DatabaseSnafu)? {
+    match queue::metrics(db, queue::MEDIA_DOWNLOAD_QUEUE)
+        .await
+        .context(DatabaseSnafu)?
+    {
         Some(metrics) => {
             let oldest = metrics
                 .oldest_msg_age_secs

@@ -13,7 +13,11 @@
 //! a pass is far longer than any sensible visibility timeout, and a crash
 //! mid-pass is covered by the next startup trigger.
 //!
-//! Both queues are created by migrations.
+//! `text_embed` carries embedding tasks `(chat_id, msg_id)`; unlike media
+//! there is no registry table — the `message_embeddings` row is the final
+//! state and the task is the only in-flight state.
+//!
+//! All queues are created by migrations.
 
 use sea_orm::{ConnectionTrait, DbBackend, Statement, Value};
 use snafu::ResultExt;
@@ -211,13 +215,16 @@ pub async fn set_vt(db: &impl ConnectionTrait, msg_id: i64, vt_secs: i32) -> Res
     Ok(())
 }
 
-pub async fn metrics(db: &impl ConnectionTrait) -> Result<Option<QueueMetrics>, Error> {
+pub async fn metrics(
+    db: &impl ConnectionTrait,
+    queue: &str,
+) -> Result<Option<QueueMetrics>, Error> {
     let row = db
         .query_one_raw(Statement::from_sql_and_values(
             DbBackend::Postgres,
             "SELECT queue_length, queue_visible_length, oldest_msg_age_sec, total_messages \
              FROM pgmq.metrics($1)",
-            vec![Value::from(MEDIA_DOWNLOAD_QUEUE)],
+            vec![Value::from(queue)],
         ))
         .await
         .context(DatabaseSnafu)?;
@@ -235,4 +242,98 @@ pub async fn metrics(db: &impl ConnectionTrait) -> Result<Option<QueueMetrics>, 
         })
     })
     .transpose()
+}
+
+// ---- text_embed queue ----
+
+/// Embedding tasks for the semantic-search pipeline.
+pub const TEXT_EMBED_QUEUE: &str = "text_embed";
+
+/// One `text_embed` task: embed the text of `(chat_id, msg_id)` into
+/// `message_embeddings`. `task_id` is the pgmq message id (renamed to avoid
+/// colliding with the archived message's own `msg_id` in the payload).
+#[derive(Debug, Clone)]
+pub struct EmbedTask {
+    pub task_id: i64,
+    pub chat_id: i64,
+    pub msg_id: i64,
+    pub read_ct: i32,
+}
+
+/// Enqueue embed tasks; duplicates are harmless (embedding upserts are
+/// idempotent), so callers need no dedup.
+pub async fn send_embed_batch(db: &impl ConnectionTrait, keys: &[(i64, i64)]) -> Result<(), Error> {
+    if keys.is_empty() {
+        return Ok(());
+    }
+    let payloads: Vec<serde_json::Value> = keys
+        .iter()
+        .map(|(chat_id, msg_id)| serde_json::json!({ "chat_id": chat_id, "msg_id": msg_id }))
+        .collect();
+    db.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "SELECT pgmq.send_batch($1, ARRAY(SELECT jsonb_array_elements($2)))",
+        vec![
+            Value::from(TEXT_EMBED_QUEUE),
+            Value::from(serde_json::Value::Array(payloads)),
+        ],
+    ))
+    .await
+    .context(DatabaseSnafu)?;
+    Ok(())
+}
+
+/// Read up to `qty` embed tasks, hidden for `vt_secs`.
+pub async fn read_embed(
+    db: &impl ConnectionTrait,
+    vt_secs: i32,
+    qty: i32,
+) -> Result<Vec<EmbedTask>, Error> {
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DbBackend::Postgres,
+            "SELECT msg_id, read_ct, message FROM pgmq.read($1, $2, $3)",
+            vec![
+                Value::from(TEXT_EMBED_QUEUE),
+                Value::from(vt_secs),
+                Value::from(qty),
+            ],
+        ))
+        .await
+        .context(DatabaseSnafu)?;
+
+    rows.iter()
+        .map(|row| {
+            let task_id: i64 = row.try_get("", "msg_id").context(DatabaseSnafu)?;
+            let message: serde_json::Value = row.try_get("", "message").context(DatabaseSnafu)?;
+            let get = |key: &str| {
+                message
+                    .get(key)
+                    .and_then(serde_json::Value::as_i64)
+                    .ok_or_else(|| {
+                        sea_orm::DbErr::Custom(format!(
+                            "embed task {task_id} lacks an integer {key}: {message}"
+                        ))
+                    })
+                    .context(DatabaseSnafu)
+            };
+            Ok(EmbedTask {
+                task_id,
+                chat_id: get("chat_id")?,
+                msg_id: get("msg_id")?,
+                read_ct: row.try_get("", "read_ct").context(DatabaseSnafu)?,
+            })
+        })
+        .collect()
+}
+
+pub async fn delete_embed(db: &impl ConnectionTrait, task_id: i64) -> Result<(), Error> {
+    db.execute_raw(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "SELECT pgmq.delete($1, $2)",
+        vec![Value::from(TEXT_EMBED_QUEUE), Value::from(task_id)],
+    ))
+    .await
+    .context(DatabaseSnafu)?;
+    Ok(())
 }

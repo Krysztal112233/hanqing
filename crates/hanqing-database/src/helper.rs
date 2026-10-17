@@ -1,5 +1,6 @@
 //! Persistence helpers for entity tables.
 
+pub mod embedding;
 pub mod media;
 pub mod message;
 pub mod peers;

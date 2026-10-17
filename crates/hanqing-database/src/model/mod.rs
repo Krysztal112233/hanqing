@@ -4,6 +4,7 @@ pub mod prelude;
 
 pub mod account_settings;
 pub mod media;
+pub mod message_embeddings;
 pub mod message_versions;
 pub mod messages;
 pub mod peers;

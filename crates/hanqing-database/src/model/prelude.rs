@@ -2,6 +2,7 @@
 
 pub use super::account_settings::Entity as AccountSettings;
 pub use super::media::Entity as Media;
+pub use super::message_embeddings::Entity as MessageEmbeddings;
 pub use super::message_versions::Entity as MessageVersions;
 pub use super::messages::Entity as Messages;
 pub use super::peers::Entity as Peers;
