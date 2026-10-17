@@ -11,6 +11,7 @@ mod m20261011_180030_split_session_update_state;
 mod m20261015_031410_create_media_queue;
 mod m20261016_054634_create_peers_table;
 mod m20261016_120122_create_backfill_queue;
+mod m20261016_132245_create_message_embeddings;
 
 pub struct Migrator;
 
@@ -29,6 +30,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261015_031410_create_media_queue::Migration),
             Box::new(m20261016_054634_create_peers_table::Migration),
             Box::new(m20261016_120122_create_backfill_queue::Migration),
+            Box::new(m20261016_132245_create_message_embeddings::Migration),
         ]
     }
 }
