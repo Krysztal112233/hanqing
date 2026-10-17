@@ -15,6 +15,7 @@ use grammers_client::sender::UpdatesConfiguration;
 use grammers_client::session::types::PeerId;
 use grammers_client::session::updates::UpdatesLike;
 use grammers_client::update::Update;
+use hanqing_database::helper::embedding as embed_store;
 use hanqing_database::helper::prelude::*;
 use hanqing_database::model::prelude::{Media, Messages};
 use sea_orm::{DatabaseConnection, TransactionTrait as _};
@@ -26,6 +27,7 @@ use tracing::{debug, info, warn};
 
 use backon::RetryableWithContext;
 
+use crate::Enqueue;
 use crate::backfill::map_message;
 use crate::error::{DatabaseSnafu, DbSnafu, Error, InvokeSnafu, StreamSetupSnafu};
 use hanqing_telegram::retry::{backoff, is_transient};
@@ -37,7 +39,7 @@ const STATE_SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Follow the live update stream forever, archiving message events.
 ///
-/// `enqueue_media` additionally dispatches every extracted media row into
+/// `enqueue` additionally dispatches every extracted media row into
 /// the pgmq download queue (same transaction as the insert); the daemon
 /// enables it when S3 storage is configured.
 pub async fn run_update_stream(
@@ -45,7 +47,7 @@ pub async fn run_update_stream(
     db: &DatabaseConnection,
     updates: mpsc::Receiver<UpdatesLike>,
     self_id: i64,
-    enqueue_media: bool,
+    enqueue: Enqueue,
     recorder: &PeerRecorder,
 ) -> Result<(), Error> {
     // catch_up: replay updates received while we were offline.
@@ -88,7 +90,7 @@ pub async fn run_update_stream(
             Err(err) => return Err(err).context(InvokeSnafu),
         };
 
-        if let Err(err) = handle_update(db, update, self_id, enqueue_media, recorder).await {
+        if let Err(err) = handle_update(db, update, self_id, enqueue, recorder).await {
             warn!(%err, "failed to archive update; skipping");
         }
         if last_sync.elapsed() >= STATE_SYNC_INTERVAL {
@@ -104,7 +106,7 @@ async fn handle_update(
     db: &DatabaseConnection,
     update: Update,
     self_id: i64,
-    enqueue_media: bool,
+    enqueue: Enqueue,
     recorder: &PeerRecorder,
 ) -> Result<(), Error> {
     let edited = matches!(&update, Update::MessageEdited(_));
@@ -121,6 +123,9 @@ async fn handle_update(
                 recorder.record(db, sender).await;
             }
             let (msg, media) = map_message(chat_id, &message, self_id)?;
+            // Capture before `msg` moves into save_all/apply_edit.
+            let msg_id = msg.msg_id;
+            let embeddable = !msg.text.is_empty();
             let mut outcome = None;
             if edited {
                 outcome = Some(
@@ -133,17 +138,32 @@ async fn handle_update(
                     .await
                     .context(DatabaseSnafu)?;
             }
-            if let Some(media) = media {
-                // Media row + download task commit together: a task never
-                // exists without its registry row (and vice versa the row
-                // is the task's payload source).
-                let file_id = media.file_id;
-                let txn = db.begin().await.context(DbSnafu)?;
-                Media::save_all(&txn, vec![media])
+            // Message rows are already committed above. The media row and
+            // its task commit together below; the embed task commits in its
+            // own transaction. A task never exists without its source row,
+            // but a crash in this window can leave a message without an
+            // embed task (recoverable with `hanqing-cli embed enqueue-pending`).
+            if edited && !embeddable {
+                // Clearing the text must not leave the old vector searchable.
+                embed_store::delete_one(db, chat_id, msg_id)
                     .await
                     .context(DatabaseSnafu)?;
-                if enqueue_media {
-                    hanqing_database::queue::send_batch(&txn, &[file_id])
+            }
+            if media.is_some() || (enqueue.embed && embeddable) {
+                let txn = db.begin().await.context(DbSnafu)?;
+                if let Some(media) = media {
+                    let file_id = media.file_id;
+                    Media::save_all(&txn, vec![media])
+                        .await
+                        .context(DatabaseSnafu)?;
+                    if enqueue.media {
+                        hanqing_database::queue::send_batch(&txn, &[file_id])
+                            .await
+                            .context(DatabaseSnafu)?;
+                    }
+                }
+                if enqueue.embed && embeddable {
+                    hanqing_database::queue::send_embed_batch(&txn, &[(chat_id, msg_id)])
                         .await
                         .context(DatabaseSnafu)?;
                 }

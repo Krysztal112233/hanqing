@@ -37,7 +37,10 @@ fn spawn_backfill_worker(ctx: &WorkerContext) -> Option<JoinHandle<()>> {
         client: ctx.client.clone(),
         db: ctx.db.clone(),
         self_id: ctx.self_id,
-        enqueue_media: ctx.config.s3.is_some(),
+        enqueue: hanqing_archive::Enqueue {
+            media: ctx.config.s3.is_some(),
+            embed: ctx.config.embedding.is_some(),
+        },
     };
     Some(tokio::spawn(async move { worker.run().await }))
 }
@@ -50,7 +53,7 @@ struct BackfillWorker {
     client: Client,
     db: DatabaseConnection,
     self_id: i64,
-    enqueue_media: bool,
+    enqueue: hanqing_archive::Enqueue,
 }
 
 impl BackfillWorker {
@@ -89,7 +92,7 @@ impl BackfillWorker {
             &self.client,
             &self.db,
             self.self_id,
-            self.enqueue_media,
+            self.enqueue,
             &recorder,
         )
         .await

@@ -65,7 +65,10 @@ async fn main() -> Result<(), Error> {
     // Live updates start before backfill so nothing arriving mid-run is
     // missed; both paths share the same idempotent upserts. Media download
     // tasks are enqueued at archive time when S3 storage is configured.
-    let enqueue_media = config.s3.is_some();
+    let enqueue = hanqing_archive::Enqueue {
+        media: config.s3.is_some(),
+        embed: config.embedding.is_some(),
+    };
     let peers = std::sync::Arc::new(hanqing_archive::PeerRecorder::new(self_id));
     let stream_db = db.clone();
     let stream_client = client.clone();
@@ -76,7 +79,7 @@ async fn main() -> Result<(), Error> {
             &stream_db,
             connection.updates,
             self_id,
-            enqueue_media,
+            enqueue,
             &stream_peers,
         )
         .await

@@ -28,6 +28,7 @@ use sea_orm::{
 use snafu::ResultExt;
 use tracing::{info, warn};
 
+use crate::Enqueue;
 use crate::error::{
     DatabaseSnafu, DbSnafu, Error, InvokeSnafu, PeerNotCachedSnafu, PeerResolveSnafu,
     SerializeSnafu,
@@ -54,14 +55,14 @@ pub struct BackfillStats {
 /// Enumerate all dialogs into `sync_state`, then backfill every pending
 /// (unfinished, enabled) chat.
 ///
-/// `enqueue_media` additionally dispatches every extracted media row into
+/// `enqueue` additionally dispatches every extracted media row into
 /// the pgmq download queue (same transaction as the insert); the daemon
 /// enables it when S3 storage is configured.
 pub async fn backfill_all(
     client: &Client,
     db: &DatabaseConnection,
     self_id: i64,
-    enqueue_media: bool,
+    enqueue: Enqueue,
     recorder: &PeerRecorder,
 ) -> Result<BackfillStats, Error> {
     let peers = register_dialogs(client, db, self_id, recorder).await?;
@@ -69,7 +70,7 @@ pub async fn backfill_all(
         client,
         db,
         self_id,
-        enqueue_media,
+        enqueue,
         recorder,
     };
     let pending = SyncState::find_pending(db).await.context(DatabaseSnafu)?;
@@ -131,7 +132,7 @@ struct BackfillCtx<'a> {
     client: &'a Client,
     db: &'a DatabaseConnection,
     self_id: i64,
-    enqueue_media: bool,
+    enqueue: Enqueue,
     recorder: &'a PeerRecorder,
 }
 
@@ -183,13 +184,13 @@ async fn backfill_chat(
                 batch.push(map_message(chat_id, &message, ctx.self_id)?);
                 total += 1;
                 if batch.len() >= BATCH_SIZE {
-                    flush_batch(ctx.db, chat_id, &mut batch, oldest, ctx.enqueue_media).await?;
+                    flush_batch(ctx.db, chat_id, &mut batch, oldest, ctx.enqueue).await?;
                 }
             }
             Ok(None) => break,
             Err(InvocationError::Rpc(err)) if err.name == "FLOOD_WAIT" => {
                 let wait = err.value.unwrap_or(30);
-                flush_batch(ctx.db, chat_id, &mut batch, oldest, ctx.enqueue_media).await?;
+                flush_batch(ctx.db, chat_id, &mut batch, oldest, ctx.enqueue).await?;
                 if wait > MAX_FLOOD_WAIT_SECS {
                     warn!(
                         chat_id,
@@ -204,13 +205,13 @@ async fn backfill_chat(
                 iter = rebuild_iter(oldest);
             }
             Err(err) => {
-                flush_batch(ctx.db, chat_id, &mut batch, oldest, ctx.enqueue_media).await?;
+                flush_batch(ctx.db, chat_id, &mut batch, oldest, ctx.enqueue).await?;
                 return Err(err).context(InvokeSnafu);
             }
         }
     }
 
-    flush_batch(ctx.db, chat_id, &mut batch, oldest, ctx.enqueue_media).await?;
+    flush_batch(ctx.db, chat_id, &mut batch, oldest, ctx.enqueue).await?;
     SyncState::mark_done(ctx.db, chat_id)
         .await
         .context(DatabaseSnafu)?;
@@ -219,15 +220,15 @@ async fn backfill_chat(
 }
 
 /// Insert the batch (messages + media metadata) and advance the watermark in
-/// one transaction. With `enqueue_media`, download tasks are dispatched into
-/// the pgmq queue in the same transaction, so a task never exists without
-/// its registry row.
+/// one transaction. With `enqueue`, download tasks (media) and embedding
+/// tasks (text-bearing messages) are dispatched into their pgmq queues in
+/// the same transaction, so a task never exists without its source row.
 async fn flush_batch(
     db: &DatabaseConnection,
     chat_id: i64,
     batch: &mut Vec<(NewMessage, Option<NewMedia>)>,
     oldest: i64,
-    enqueue_media: bool,
+    enqueue: Enqueue,
 ) -> Result<(), Error> {
     if batch.is_empty() {
         return Ok(());
@@ -237,14 +238,30 @@ async fn flush_batch(
         std::mem::take(batch).into_iter().unzip();
     let media: Vec<NewMedia> = media.into_iter().flatten().collect();
     let file_ids: Vec<i64> = media.iter().map(|m| m.file_id).collect();
+    // Collected before `save_all` moves the batch; empty text has nothing
+    // to embed.
+    let embed_keys: Vec<(i64, i64)> = if enqueue.embed {
+        messages
+            .iter()
+            .filter(|m| !m.text.is_empty())
+            .map(|m| (m.chat_id, m.msg_id))
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let txn = db.begin().await.context(DbSnafu)?;
     let count = Messages::save_all(&txn, messages)
         .await
         .context(DatabaseSnafu)?;
     let media_count = Media::save_all(&txn, media).await.context(DatabaseSnafu)?;
-    if enqueue_media {
+    if enqueue.media {
         hanqing_database::queue::send_batch(&txn, &file_ids)
+            .await
+            .context(DatabaseSnafu)?;
+    }
+    if !embed_keys.is_empty() {
+        hanqing_database::queue::send_embed_batch(&txn, &embed_keys)
             .await
             .context(DatabaseSnafu)?;
     }
