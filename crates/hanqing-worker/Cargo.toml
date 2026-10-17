@@ -16,4 +16,5 @@ grammers-client.workspace = true
 hanqing-archive.workspace = true
 hanqing-config.workspace = true
 hanqing-database.workspace = true
+hanqing-embedding.workspace = true
 hanqing-telegram.workspace = true
