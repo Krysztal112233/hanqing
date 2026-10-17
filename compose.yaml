@@ -1,5 +1,9 @@
 # hanqing — one-command self-hosted deployment.
 #
+# For an existing external PostgreSQL deployment, use a local (uncommitted)
+# compose.runtime.yaml instead: it runs only daemon + embedding, against
+# HANQING__DATABASE__URL.
+#
 #   cp .env.sample .env          # fill HANQING__TELEGRAM__API_ID / API_HASH
 #   docker compose run --rm cli login     # interactive sign-in (starts db first)
 #   docker compose up -d daemon           # archive!
