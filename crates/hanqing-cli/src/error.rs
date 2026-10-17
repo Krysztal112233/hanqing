@@ -31,6 +31,13 @@ pub enum Error {
         location: Location,
     },
 
+    #[snafu(display("embedding service error: {source}"))]
+    Embed {
+        source: hanqing_embedding::Error,
+        #[snafu(implicit)]
+        location: Location,
+    },
+
     #[snafu(display("migration error: {source}"))]
     Migrate {
         source: sea_orm_migration::DbErr,

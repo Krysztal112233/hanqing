@@ -44,6 +44,10 @@ enum Command {
     Search {
         /// Search query.
         query: String,
+        /// Semantic search (vector similarity) instead of full-text match;
+        /// requires `[embedding]` in the config.
+        #[arg(long)]
+        semantic: bool,
         /// Restrict to one chat.
         #[arg(long, allow_negative_numbers = true)]
         chat: Option<i64>,
@@ -81,6 +85,12 @@ enum Command {
         #[command(subcommand)]
         command: PeersCommand,
     },
+
+    /// Semantic-search embedding index.
+    Embed {
+        #[command(subcommand)]
+        command: EmbedCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -108,6 +118,15 @@ enum PeersCommand {
     /// Refresh the display-name cache: all dialogs, then resolve message
     /// senders never seen as a dialog (one RPC each; can take a while).
     Sync,
+}
+
+#[derive(Subcommand)]
+enum EmbedCommand {
+    /// Enqueue every text-bearing message into the embed queue. Run once
+    /// when enabling semantic search on an existing archive.
+    EnqueuePending,
+    /// Embedding coverage and queue metrics.
+    Stats,
 }
 
 #[derive(Subcommand)]
@@ -171,12 +190,24 @@ async fn main() -> Result<(), Error> {
         }
         Command::Search {
             query,
+            semantic,
             chat,
             limit,
             offset,
             chars,
         } => {
-            hanqing_cli::search::run(&db, &query, chat, limit, offset, chars).await?;
+            if semantic {
+                let Some(embedding) = &config.embedding else {
+                    tracing::error!("--semantic requires [embedding] in hanqing.toml");
+                    std::process::exit(2);
+                };
+                hanqing_cli::search::run_semantic(
+                    &db, embedding, &query, chat, limit, offset, chars,
+                )
+                .await?;
+            } else {
+                hanqing_cli::search::run(&db, &query, chat, limit, offset, chars).await?;
+            }
         }
         Command::Peers {
             command: PeersCommand::Sync,
@@ -197,6 +228,16 @@ async fn main() -> Result<(), Error> {
                 .expect("self user has a real id");
             hanqing_cli::peers::sync(&db, &connection, self_id).await?;
         }
+        Command::Embed { command } => match command {
+            EmbedCommand::EnqueuePending => {
+                let total = hanqing_cli::embed::enqueue_pending(&db).await?;
+                info!(total, "embed enqueue done");
+            }
+            EmbedCommand::Stats => {
+                hanqing_cli::embed::stats(&db, config.embedding.as_ref().map(|e| e.model.as_str()))
+                    .await?;
+            }
+        },
         Command::Media { command } => match command {
             MediaCommand::EnqueuePending => {
                 let count = hanqing_cli::media::enqueue_pending(&db).await?;

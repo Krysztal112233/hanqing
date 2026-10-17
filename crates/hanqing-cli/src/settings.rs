@@ -11,7 +11,11 @@ use crate::error::{
 };
 
 /// Keys accepted by `set`/`reset`.
-const VALID_KEYS: &[&str] = &["media.download_enabled", "media.max_size_bytes"];
+const VALID_KEYS: &[&str] = &[
+    "media.download_enabled",
+    "media.max_size_bytes",
+    "embedding.enabled",
+];
 
 fn valid_keys() -> String {
     VALID_KEYS.join(", ")
@@ -116,6 +120,16 @@ fn assign(settings: &mut AccountSettings, key: &str, value: &str) -> Result<(), 
                 .build()
             })?;
         }
+        "embedding.enabled" => {
+            settings.embedding.enabled = value.parse().map_err(|_| {
+                InvalidValueSnafu {
+                    key,
+                    value,
+                    expected: "true or false",
+                }
+                .build()
+            })?;
+        }
         _ => {
             return UnknownSettingSnafu {
                 key,
@@ -132,10 +146,28 @@ fn current(settings: &AccountSettings, key: &str) -> Result<impl std::fmt::Displ
     match key {
         "media.download_enabled" => Ok(settings.media.download_enabled.to_string()),
         "media.max_size_bytes" => Ok(settings.media.max_size_bytes.to_string()),
+        "embedding.enabled" => Ok(settings.embedding.enabled.to_string()),
         _ => UnknownSettingSnafu {
             key,
             valid: valid_keys(),
         }
         .fail(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedding_enabled_is_settable_and_readable() {
+        let mut settings = AccountSettings::default();
+        assign(&mut settings, "embedding.enabled", "true").unwrap();
+        assert!(settings.embedding.enabled);
+        assert_eq!(
+            current(&settings, "embedding.enabled").unwrap().to_string(),
+            "true"
+        );
+        assert!(VALID_KEYS.contains(&"embedding.enabled"));
     }
 }
