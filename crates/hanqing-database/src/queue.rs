@@ -283,6 +283,19 @@ pub async fn send_embed_batch(db: &impl ConnectionTrait, keys: &[(i64, i64)]) ->
     Ok(())
 }
 
+/// Run the server-side `enqueue_text_embed()` procedure, which walks the
+/// text-bearing message backlog in committed batches and enqueues each batch.
+/// One client round trip; progress is reported by the procedure's notices.
+pub async fn call_enqueue_text_embed(db: &impl ConnectionTrait) -> Result<(), Error> {
+    db.execute_raw(Statement::from_string(
+        DbBackend::Postgres,
+        "CALL enqueue_text_embed()",
+    ))
+    .await
+    .context(DatabaseSnafu)?;
+    Ok(())
+}
+
 /// Read up to `qty` embed tasks, hidden for `vt_secs`.
 pub async fn read_embed(
     db: &impl ConnectionTrait,

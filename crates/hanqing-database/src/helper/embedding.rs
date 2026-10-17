@@ -204,38 +204,6 @@ pub async fn fetch_texts(
         .collect())
 }
 
-/// Keyset page of embeddable message keys (text-bearing, not deleted),
-/// ordered by primary key. Backlog bootstrap pagination.
-pub async fn find_embeddable_page(
-    db: &impl ConnectionTrait,
-    after: (i64, i64),
-    limit: u64,
-) -> Result<Vec<(i64, i64)>, Error> {
-    let rows = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DbBackend::Postgres,
-            "SELECT chat_id, msg_id FROM messages \
-             WHERE deleted_at IS NULL AND text <> '' \
-               AND (chat_id, msg_id) > ($1, $2) \
-             ORDER BY chat_id, msg_id LIMIT $3",
-            vec![
-                Value::from(after.0),
-                Value::from(after.1),
-                Value::from(limit),
-            ],
-        ))
-        .await
-        .context(DatabaseSnafu)?;
-    rows.iter()
-        .map(|row| {
-            Ok((
-                row.try_get("", "chat_id").context(DatabaseSnafu)?,
-                row.try_get("", "msg_id").context(DatabaseSnafu)?,
-            ))
-        })
-        .collect()
-}
-
 /// `(embedded live messages, embeddable messages)` for stats. With `model`,
 /// only rows for that model count, so a model swap shows 0% instead of stale
 /// coverage.

@@ -230,8 +230,8 @@ async fn main() -> Result<(), Error> {
         }
         Command::Embed { command } => match command {
             EmbedCommand::EnqueuePending => {
-                let total = hanqing_cli::embed::enqueue_pending(&db).await?;
-                info!(total, "embed enqueue done");
+                hanqing_cli::embed::enqueue_pending(&db).await?;
+                info!("embed enqueue done");
             }
             EmbedCommand::Stats => {
                 hanqing_cli::embed::stats(&db, config.embedding.as_ref().map(|e| e.model.as_str()))
