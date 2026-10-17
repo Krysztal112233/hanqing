@@ -13,6 +13,7 @@ mod m20261016_054634_create_peers_table;
 mod m20261016_120122_create_backfill_queue;
 mod m20261016_132245_create_message_embeddings;
 mod m20261017_101314_add_message_embeddings_hnsw;
+mod m20261017_102143_add_enqueue_text_embed_procedure;
 
 pub struct Migrator;
 
@@ -33,6 +34,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261016_120122_create_backfill_queue::Migration),
             Box::new(m20261016_132245_create_message_embeddings::Migration),
             Box::new(m20261017_101314_add_message_embeddings_hnsw::Migration),
+            Box::new(m20261017_102143_add_enqueue_text_embed_procedure::Migration),
         ]
     }
 }
