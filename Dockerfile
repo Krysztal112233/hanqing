@@ -1,6 +1,6 @@
 # hanqing images, one per compose service, selected by build target:
 #   target app — daemon + hanqing-cli (management CLI incl. `migrate`)
-#   target db  — pgroonga (search) + pgmq (media download queue)
+#   target db  — pgroonga (search) + pgmq (task queues) + pgvector (semantic search)
 #
 # rustls-only dependency tree; no system libraries needed beyond glibc.
 
@@ -32,6 +32,11 @@ CMD ["hanqing"]
 # set_vt/metrics) is stable across pgmq 1.x, so this does not need to match
 # the production server's 1.11.2 exactly.
 FROM groonga/pgroonga:4.1.0-debian-18 AS db
+
+# pgvector from PGDG (the pgroonga image inherits the postgres image's apt repo).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-18-pgvector \
+ && rm -rf /var/lib/apt/lists/*
 
 ARG PGMQ_VERSION=1.13.0
 ADD https://github.com/pgmq/pgmq/raw/v${PGMQ_VERSION}/pgmq-extension/pgmq.control \

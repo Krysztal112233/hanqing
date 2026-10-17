@@ -6,3 +6,12 @@ max_connections = 8
 
 [worker.media]
 download_workers = 1     # concurrent downloader replicas; 0 disables
+
+# Semantic search embedding service (opt-in). All archived message text and
+# every semantic query are sent to this endpoint; point it at a local server
+# to keep the archive on-premises. The client appends `/embeddings`, so
+# include the API version segment. The storage column is fixed at 1024 dims.
+# [embedding]
+# base_url = "http://embed:8080/v1"
+# model = "Qwen/Qwen3-Embedding-0.6B"
+# dimensions = 1024

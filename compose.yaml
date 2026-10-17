@@ -91,14 +91,18 @@ services:
   # GPU hosts: switch to the server-cuda image + NVIDIA container toolkit
   # (CDI) and add -ngl 99 to offload layers; CPU is the default because it
   # works everywhere (slow for bulk backfill, fine for incremental load).
-  # Point the daemon at it via HANQING__EMBEDDING__BASE_URL=http://embed:8080
+  # Point the daemon at it via HANQING__EMBEDDING__BASE_URL=http://embed:8080/v1
   # (+ HANQING__EMBEDDING__MODEL=Qwen/Qwen3-Embedding-0.6B).
+  # The client appends `/embeddings`; include the API version segment.
   embed:
     profiles: ["embed"]
     image: ghcr.io/ggml-org/llama.cpp:server
     command:
       - --model
       - /models/Qwen3-Embedding-0.6B-Q8_0.gguf
+      # Match HANQING__EMBEDDING__MODEL in the daemon environment.
+      - --alias
+      - Qwen/Qwen3-Embedding-0.6B
       - --embeddings
       - --pooling
       - last # Qwen3-Embedding is a last-token-pooling model
@@ -110,7 +114,7 @@ services:
       - "8080"
     volumes:
       - embed-models:/models
-    # no host port: only reached from other services at http://embed:8080
+    # no host port: only reached from other services at http://embed:8080/v1
     restart: unless-stopped
 
 volumes:
