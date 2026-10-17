@@ -1,0 +1,13 @@
+[package]
+name = "hanqing-embedding"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hanqing-config.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+snafu.workspace = true
+
+[dev-dependencies]
+url.workspace = true

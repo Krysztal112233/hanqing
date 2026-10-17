@@ -6,6 +6,7 @@ members = [
 	"crates/hanqing-cli",
 	"crates/hanqing-config",
 	"crates/hanqing-database",
+	"crates/hanqing-embedding",
 	"crates/hanqing-telegram",
 	"crates/hanqing-worker",
 	"crates/migration",
@@ -26,6 +27,7 @@ inquire = "0.9"
 futures = "0.3"
 linkme = "0.3"
 mimalloc = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rust-s3 = { version = "0.38", default-features = false, features = ["tokio-rustls-tls-ring", "fail-on-err"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -33,12 +35,14 @@ snafu = "0.8"
 strum = { version = "0.27", features = ["derive"] }
 tokio = { version = "1.52", features = ["full"] }
 tracing = "0.1"
+url = { version = "2", features = ["serde"] }
 uuid = { version = "1.23", features = ["v7"] }
 
 hanqing-archive = { path = "./crates/hanqing-archive/" }
 hanqing-cli = { path = "./crates/hanqing-cli/" }
 hanqing-config = { path = "./crates/hanqing-config/" }
 hanqing-database = { path = "./crates/hanqing-database/" }
+hanqing-embedding = { path = "./crates/hanqing-embedding/" }
 hanqing-telegram = { path = "./crates/hanqing-telegram/" }
 hanqing-worker = { path = "./crates/hanqing-worker/" }
 migration = { path = "./crates/migration/" }
@@ -62,6 +66,7 @@ version = "=2.0.4"
 default-features = false
 features = [
 	"macros",
+	"postgres-vector",
 	"runtime-tokio",
 	"sqlx-postgres",
 	"with-chrono",

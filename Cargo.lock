@@ -1576,6 +1576,7 @@ dependencies = [
  "hanqing-archive",
  "hanqing-config",
  "hanqing-database",
+ "hanqing-embedding",
  "hanqing-telegram",
  "inquire",
  "migration",
@@ -1595,6 +1596,7 @@ dependencies = [
  "config",
  "serde",
  "snafu",
+ "url",
 ]
 
 [[package]]
@@ -1611,6 +1613,17 @@ dependencies = [
  "strum 0.27.2",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "hanqing-embedding"
+version = "0.1.0"
+dependencies = [
+ "hanqing-config",
+ "reqwest",
+ "serde",
+ "snafu",
+ "url",
 ]
 
 [[package]]
@@ -1642,6 +1655,7 @@ dependencies = [
  "hanqing-archive",
  "hanqing-config",
  "hanqing-database",
+ "hanqing-embedding",
  "hanqing-telegram",
  "linkme",
  "rust-s3",
@@ -2369,6 +2383,7 @@ dependencies = [
 name = "migration"
 version = "0.1.0"
 dependencies = [
+ "sea-orm",
  "sea-orm-migration",
 ]
 
@@ -2808,6 +2823,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3673cba5b9a124916096a423b806a9f29620972c6c97b08db5f2053e9428b481"
 dependencies = [
  "serde",
+ "sqlx",
 ]
 
 [[package]]
@@ -3487,6 +3503,7 @@ checksum = "546040c653a705e60ec65ecd3191a809603734bebbc225775916dea9ae409b31"
 dependencies = [
  "chrono",
  "ordered-float",
+ "pgvector",
  "rust_decimal",
  "sea-query-derive",
  "serde_json",
@@ -3514,6 +3531,7 @@ version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4eaa419cdb9157da1361186b1959983eb2ea0dcb9a3c69dc45c449ecb2af8fef"
 dependencies = [
+ "pgvector",
  "sea-query",
  "sqlx",
 ]
@@ -4535,6 +4553,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]
