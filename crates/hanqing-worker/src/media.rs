@@ -95,6 +95,14 @@ const MAX_ATTEMPTS: i32 = 50;
 /// sleeping inline.
 const MAX_FLOOD_WAIT_SECS: u32 = 600;
 
+/// Consecutive short flood waits tolerated before parking the task. A
+/// persistent flood wait for one file must not hold the only media worker
+/// (and therefore the whole queue) forever.
+const MAX_INLINE_FLOOD_WAITS: u32 = 3;
+
+/// Minimum visibility timeout when repeated short flood waits park a task.
+const FLOOD_POSTPONE_SECS: u32 = 300;
+
 /// Idle poll cadence when the queue is empty; when downloads are disabled
 /// (`media.download_enabled = false`) the worker sleeps on this cadence too,
 /// re-reading the settings document every cycle.
@@ -106,8 +114,20 @@ enum Download {
     /// Permanent failure (gone at the source, left the group, ...).
     Unavailable(String),
     Oversize,
-    /// Flood wait beyond the inline-sleep cap; postpone by this many seconds.
+    /// Flood wait beyond the inline-sleep cap, or repeated short flood waits:
+    /// postpone the task by this many seconds.
     Postpone(i32),
+}
+
+/// Decide whether a flood wait should park the task instead of sleeping
+/// inline. Long waits park immediately; short ones park after a run of
+/// `MAX_INLINE_FLOOD_WAITS`, so one file cannot hold the whole queue.
+fn flood_postpone(wait: u32, consecutive: u32) -> Option<i32> {
+    if wait > MAX_FLOOD_WAIT_SECS || consecutive >= MAX_INLINE_FLOOD_WAITS {
+        Some(wait.max(FLOOD_POSTPONE_SECS) as i32)
+    } else {
+        None
+    }
 }
 
 /// Media downloader wired to the daemon's Telegram client and session.
@@ -236,7 +256,7 @@ impl MediaDownloader {
                 self.finish_state(task, MediaStatus::Skipped).await;
             }
             Ok(Download::Postpone(secs)) => {
-                info!(file_id, secs, "flood wait exceeds cap; postponing task");
+                info!(file_id, secs, "flood wait; postponing task");
                 if let Err(err) = queue::set_vt(&self.db, task.msg_id, secs).await {
                     warn!(%err, file_id, "failed to postpone task; VT redelivers");
                 }
@@ -318,8 +338,9 @@ impl MediaDownloader {
     /// errors retry via the shared backon policy (a fresh iterator per
     /// attempt: grammers spends a failed `DownloadIter`, so retries restart
     /// from offset 0). Flood waits are slept through outside the retry
-    /// budget, and long ones postpone the task instead.
+    /// budget; long ones, and a run of short ones, park the task instead.
     async fn download(&self, media: &TgMedia) -> Result<Download, Error> {
+        let mut flood_waits = 0u32;
         loop {
             let result = (|| async {
                 let mut iter = self.client.iter_download(media);
@@ -338,8 +359,10 @@ impl MediaDownloader {
                 Ok(bytes) => return Ok(Download::Done(bytes)),
                 Err(InvocationError::Rpc(rpc)) if rpc.name == "FLOOD_WAIT" => {
                     let wait = rpc.value.unwrap_or(30);
-                    if wait > MAX_FLOOD_WAIT_SECS {
-                        return Ok(Download::Postpone(wait as i32));
+                    flood_waits += 1;
+                    if let Some(secs) = flood_postpone(wait, flood_waits) {
+                        info!(wait, secs, "flood wait; postponing task");
+                        return Ok(Download::Postpone(secs));
                     }
                     warn!(wait, "download flood wait; sleeping");
                     tokio::time::sleep(Duration::from_secs(u64::from(wait) + 1)).await;
@@ -375,4 +398,32 @@ impl MediaDownloader {
 /// insertion, so re-uploads overwrite the same key.
 fn object_key(row: &MediaModel) -> String {
     format!("media/{}/{}", row.kind, row.file_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_flood_wait_parks_immediately() {
+        assert_eq!(
+            flood_postpone(MAX_FLOOD_WAIT_SECS + 1, 1),
+            Some((MAX_FLOOD_WAIT_SECS + 1) as i32)
+        );
+    }
+
+    #[test]
+    fn short_flood_waits_sleep_until_the_cap() {
+        assert_eq!(flood_postpone(8, 1), None);
+        assert_eq!(flood_postpone(8, 2), None);
+        assert_eq!(
+            flood_postpone(8, MAX_INLINE_FLOOD_WAITS),
+            Some(FLOOD_POSTPONE_SECS as i32)
+        );
+    }
+
+    #[test]
+    fn repeated_short_waits_keep_the_minimum_park() {
+        assert_eq!(flood_postpone(600, MAX_INLINE_FLOOD_WAITS), Some(600));
+    }
 }
