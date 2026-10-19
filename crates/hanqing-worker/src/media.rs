@@ -367,6 +367,16 @@ impl MediaDownloader {
                     warn!(wait, "download flood wait; sleeping");
                     tokio::time::sleep(Duration::from_secs(u64::from(wait) + 1)).await;
                 }
+                // `fetch_and_download` already refreshed the message and its
+                // file reference; a 400/403 here is a permanent per-file
+                // failure (expired reference, revoked access, ...). Mark it
+                // unavailable instead of burning redeliveries.
+                Err(InvocationError::Rpc(rpc)) if rpc.code == 400 || rpc.code == 403 => {
+                    return Ok(Download::Unavailable(format!(
+                        "download permanently denied ({} {})",
+                        rpc.code, rpc.name
+                    )));
+                }
                 Err(err) => return Err(err).context(InvokeSnafu),
             }
         }
