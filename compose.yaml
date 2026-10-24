@@ -62,10 +62,9 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
-  # On-demand utility: `docker compose run --rm cli login|settings|chats ...`
-  # (no profile: `up -d` would start it once and it exits immediately — set
-  # profiles if that noise bothers you)
+  # On-demand CLI: `docker compose run --rm cli login|settings|chats ...`
   cli:
+    profiles: ["cli"]
     build:
       context: .
       dockerfile: Dockerfile
