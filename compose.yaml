@@ -1,12 +1,8 @@
 # hanqing — one-command self-hosted deployment.
 #
-# For an existing external PostgreSQL deployment, use a local (uncommitted)
-# compose.runtime.yaml instead: it runs only daemon + embedding, against
-# HANQING__DATABASE__URL.
-#
 #   cp .env.sample .env          # fill HANQING__TELEGRAM__API_ID / API_HASH
 #   docker compose run --rm cli login     # interactive sign-in (starts db first)
-#   docker compose up -d daemon           # archive!
+#   docker compose up -d                  # archive + embedding!
 #
 # Session lives in Postgres; media files go to S3 (HANQING__S3__*). Both
 # survive restarts and image rebuilds.
@@ -58,6 +54,8 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       HANQING__DATABASE__URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      HANQING__EMBEDDING__BASE_URL: http://embed:8080/v1
+      HANQING__EMBEDDING__MODEL: Qwen/Qwen3-Embedding-0.6B
       RUST_LOG: ${RUST_LOG:-info,hanqing=debug}
     depends_on:
       migrate:
@@ -82,26 +80,17 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
-  # Semantic-search embedding service (opt-in; the daemon runs fine without
-  # it). Qwen3-Embedding-0.6B on llama.cpp, OpenAI-compatible endpoint.
-  #
-  # One-time model download into the volume:
-  #   docker compose run --rm --entrypoint sh embed -c \
-  #     'curl -L -o /models/Qwen3-Embedding-0.6B-Q8_0.gguf \
-  #      https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf'
-  #
-  # GPU hosts: switch to the server-cuda image + NVIDIA container toolkit
-  # (CDI) and add -ngl 99 to offload layers; CPU is the default because it
-  # works everywhere (slow for bulk backfill, fine for incremental load).
-  # Point the daemon at it via HANQING__EMBEDDING__BASE_URL=http://embed:8080/v1
-  # (+ HANQING__EMBEDDING__MODEL=Qwen/Qwen3-Embedding-0.6B).
-  # The client appends `/embeddings`; include the API version segment.
+  # CPU Qwen3 embedding server; first start downloads from Hugging Face.
+  # embed-models caches downloads; daemon calls the OpenAI /v1/embeddings API.
   embed:
-    profiles: ["embed"]
     image: ghcr.io/ggml-org/llama.cpp:server
+    environment:
+      LLAMA_CACHE: /models
     command:
-      - --model
-      - /models/Qwen3-Embedding-0.6B-Q8_0.gguf
+      - --hf-repo
+      - Qwen/Qwen3-Embedding-0.6B-GGUF
+      - --hf-file
+      - Qwen3-Embedding-0.6B-Q8_0.gguf
       # Match HANQING__EMBEDDING__MODEL in the daemon environment.
       - --alias
       - Qwen/Qwen3-Embedding-0.6B
