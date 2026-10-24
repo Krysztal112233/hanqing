@@ -130,6 +130,15 @@ fn flood_postpone(wait: u32, consecutive: u32) -> Option<i32> {
     }
 }
 
+/// A 400 about the file *reference* is cured by the next delivery's message
+/// re-fetch (`fetch_and_download`), so it must not fail the row permanently:
+/// VT redelivery retries it and `MAX_ATTEMPTS` bounds the uncurable case.
+/// Any other 400/403 mid-download is a permanent per-file failure.
+fn is_permanent_download_denial(code: i32, name: &str) -> bool {
+    (code == 400 || code == 403)
+        && !matches!(name, "FILE_REFERENCE_EXPIRED" | "FILE_REFERENCE_INVALID")
+}
+
 /// Media downloader wired to the daemon's Telegram client and session.
 pub struct MediaDownloader {
     client: Client,
@@ -223,7 +232,7 @@ impl MediaDownloader {
             debug!(file_id, status = %row.status, "already terminal; dropping task");
             return self.finish(task).await;
         }
-        if task.read_ct > MAX_ATTEMPTS {
+        if task.read_ct >= MAX_ATTEMPTS {
             warn!(
                 file_id,
                 read_ct = task.read_ct,
@@ -259,6 +268,12 @@ impl MediaDownloader {
                 info!(file_id, secs, "flood wait; postponing task");
                 if let Err(err) = queue::set_vt(&self.db, task.msg_id, secs).await {
                     warn!(%err, file_id, "failed to postpone task; VT redelivers");
+                } else if let Err(err) =
+                    Media::mark_state(&self.db, file_id, MediaStatus::Pending).await
+                {
+                    // A parked row is waiting, not downloading; redelivery
+                    // re-marks it `downloading`.
+                    warn!(%err, file_id, "failed to reset parked media to pending");
                 }
             }
             Err(err) => warn!(%err, file_id, "download failed; task redelivers"),
@@ -306,9 +321,16 @@ impl MediaDownloader {
         };
         let messages = match self.client.get_messages_by_id(peer_ref, &[msg_id]).await {
             Ok(messages) => messages,
-            // Long flood wait: park the task instead of burning attempts.
+            // Flood wait on the fetch: park unconditionally (a cheap RPC,
+            // so unlike the download path there is nothing to sleep through
+            // inline), floored at the same minimum park as download-path
+            // parks so a short wait cannot churn the queue.
             Err(InvocationError::Rpc(rpc)) if rpc.name == "FLOOD_WAIT" => {
-                return Ok(Download::Postpone(rpc.value.unwrap_or(300) as i32));
+                let secs = rpc
+                    .value
+                    .unwrap_or(FLOOD_POSTPONE_SECS)
+                    .max(FLOOD_POSTPONE_SECS);
+                return Ok(Download::Postpone(secs as i32));
             }
             // 400/403 here means the peer or message is permanently
             // inaccessible (left the group, banned, invalid id): no amount
@@ -360,18 +382,21 @@ impl MediaDownloader {
                 Err(InvocationError::Rpc(rpc)) if rpc.name == "FLOOD_WAIT" => {
                     let wait = rpc.value.unwrap_or(30);
                     flood_waits += 1;
+                    // `process` logs the park with `file_id`; keep the raw
+                    // wait value at debug to avoid a duplicate info line.
                     if let Some(secs) = flood_postpone(wait, flood_waits) {
-                        info!(wait, secs, "flood wait; postponing task");
+                        debug!(wait, secs, "flood wait; postponing task");
                         return Ok(Download::Postpone(secs));
                     }
                     warn!(wait, "download flood wait; sleeping");
                     tokio::time::sleep(Duration::from_secs(u64::from(wait) + 1)).await;
                 }
-                // `fetch_and_download` already refreshed the message and its
-                // file reference; a 400/403 here is a permanent per-file
-                // failure (expired reference, revoked access, ...). Mark it
-                // unavailable instead of burning redeliveries.
-                Err(InvocationError::Rpc(rpc)) if rpc.code == 400 || rpc.code == 403 => {
+                // A 400/403 here is a permanent per-file failure (revoked
+                // access, invalid file id, ...) - except file-reference
+                // errors, which the next delivery's re-fetch may cure.
+                Err(InvocationError::Rpc(rpc))
+                    if is_permanent_download_denial(rpc.code, &rpc.name) =>
+                {
                     return Ok(Download::Unavailable(format!(
                         "download permanently denied ({} {})",
                         rpc.code, rpc.name
@@ -435,5 +460,24 @@ mod tests {
     #[test]
     fn repeated_short_waits_keep_the_minimum_park() {
         assert_eq!(flood_postpone(600, MAX_INLINE_FLOOD_WAITS), Some(600));
+    }
+
+    #[test]
+    fn file_reference_errors_are_not_permanent() {
+        assert!(!is_permanent_download_denial(400, "FILE_REFERENCE_EXPIRED"));
+        assert!(!is_permanent_download_denial(400, "FILE_REFERENCE_INVALID"));
+    }
+
+    #[test]
+    fn other_client_errors_are_permanent() {
+        assert!(is_permanent_download_denial(400, "FILE_ID_INVALID"));
+        assert!(is_permanent_download_denial(400, "MEDIA_EMPTY"));
+        assert!(is_permanent_download_denial(403, "CHAT_FORBIDDEN"));
+    }
+
+    #[test]
+    fn server_errors_are_not_permanent() {
+        assert!(!is_permanent_download_denial(500, "INTERNAL"));
+        assert!(!is_permanent_download_denial(-503, "Timeout"));
     }
 }
